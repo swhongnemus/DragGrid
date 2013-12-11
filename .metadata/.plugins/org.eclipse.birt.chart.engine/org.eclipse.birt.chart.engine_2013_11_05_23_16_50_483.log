@@ -1,0 +1,522 @@
+2013. 11. 5 오후 11:16:50 org.eclipse.birt.chart.device.swt.SwtDisplayServer <init>
+정보: SWT Display Server: cocoa v4,333
+2013. 11. 5 오후 11:16:50 org.eclipse.birt.chart.device.swt.R31Enhance <clinit>
+정보: Advanced SWT graphics functions enabled.
+2013. 11. 5 오후 11:16:50 org.eclipse.birt.chart.device.swt.SwtRendererImpl setProperty
+정보: Using graphics context org.eclipse.swt.graphics.GC@GC {org.eclipse.swt.internal.cocoa.NSGraphicsContext{107202386232704}}
+2013. 11. 5 오후 11:16:50 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:16:50 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.StorageUnitRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:16:51 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:16:51 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:16:53 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:16:54 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 5 오후 11:27:40 org.eclipse.birt.chart.device.swt.SwtDisplayServer <init>
+정보: SWT Display Server: cocoa v4,333
+2013. 11. 5 오후 11:27:41 org.eclipse.birt.chart.device.swt.SwtRendererImpl setProperty
+정보: Using graphics context org.eclipse.swt.graphics.GC@GC {org.eclipse.swt.internal.cocoa.NSGraphicsContext{106102874683712}}
+2013. 11. 5 오후 11:27:41 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:27:41 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.StorageUnitRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:27:41 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:27:41 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 5 오후 11:27:43 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:32:10 org.eclipse.birt.chart.device.swt.SwtDisplayServer <init>
+정보: SWT Display Server: cocoa v4,333
+2013. 11. 6 오후 10:32:11 org.eclipse.birt.chart.device.swt.SwtRendererImpl setProperty
+정보: Using graphics context org.eclipse.swt.graphics.GC@GC {org.eclipse.swt.internal.cocoa.NSGraphicsContext{106102885079616}}
+2013. 11. 6 오후 10:32:11 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:32:11 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.StorageUnitRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:32:11 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:32:11 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:32:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:38:36 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:44:35 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 10:44:36 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:07:12 org.eclipse.birt.chart.device.swt.SwtDisplayServer <init>
+정보: SWT Display Server: cocoa v4,333
+2013. 11. 6 오후 11:07:12 org.eclipse.birt.chart.device.swt.SwtRendererImpl setProperty
+정보: Using graphics context org.eclipse.swt.graphics.GC@GC {org.eclipse.swt.internal.cocoa.NSGraphicsContext{106652638853376}}
+2013. 11. 6 오후 11:07:12 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:07:12 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.StorageUnitRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:07:12 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:07:12 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:07:16 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:09:34 org.eclipse.birt.chart.device.swt.SwtDisplayServer <init>
+정보: SWT Display Server: cocoa v4,333
+2013. 11. 6 오후 11:09:34 org.eclipse.birt.chart.device.swt.SwtRendererImpl setProperty
+정보: Using graphics context org.eclipse.swt.graphics.GC@GC {org.eclipse.swt.internal.cocoa.NSGraphicsContext{106652636712448}}
+2013. 11. 6 오후 11:09:34 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:09:34 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.StorageUnitRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:09:34 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:09:34 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:09:37 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:09:37 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:09:37 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:09:37 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:09:37 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:09:37 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:09:38 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:09:41 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:09:41 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:09:41 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:09:41 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:09:41 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:09:41 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:09:41 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:17:36 org.eclipse.birt.chart.device.swt.SwtDisplayServer <init>
+정보: SWT Display Server: cocoa v4,333
+2013. 11. 6 오후 11:17:36 org.eclipse.birt.chart.device.swt.SwtRendererImpl setProperty
+정보: Using graphics context org.eclipse.swt.graphics.GC@GC {org.eclipse.swt.internal.cocoa.NSGraphicsContext{106652640992192}}
+2013. 11. 6 오후 11:17:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:17:36 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.StorageUnitRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:17:36 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:17:36 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:17:38 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter
+2013. 11. 6 오후 11:17:39 org.eclipse.birt.chart.device.swing.SwingDisplayServer <init>
+정보: SWING Display Server: Apple Inc. v1.6.0_65
+2013. 11. 6 오후 11:17:39 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: Trying to load Chart Java event handler class...
+2013. 11. 6 오후 11:17:39 org.eclipse.birt.chart.script.AbstractScriptHandler register
+정보: A Chart Java event handler class [class org.eclipse.mat.impl.chart.LabelRenderScript] has been loaded successfully.
+2013. 11. 6 오후 11:17:39 org.eclipse.birt.chart.device.swing.SwingRendererImpl prepareGraphicsContext
+정보: Using graphics context sun.java2d.SunGraphics2D[font=java.awt.Font[family=Lucida Grande,name=Lucida Grande,style=plain,size=13],color=java.awt.Color[r=255,g=255,b=255]]
+2013. 11. 6 오후 11:17:39 org.eclipse.birt.chart.render.EmptyWithoutAxes renderSeries
+정보: org.eclipse.birt.chart.render.EmptyWithoutAxes: renderSeries() [1/2]
+2013. 11. 6 오후 11:17:39 org.eclipse.birt.chart.extension.render.Pie renderSeries
+정보: {0}: renderSeries() [{1}/{2}]org.eclipse.birt.chart.extension.render.Pie22
+2013. 11. 6 오후 11:17:39 org.eclipse.birt.chart.device.image.JavaxImageIOWriter after
+정보: Using {0} image writer {1}pngcom.sun.imageio.plugins.png.PNGImageWriter

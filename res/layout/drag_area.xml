@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<net.ronze.test.drag_slider.TestDragArea xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent" >
+    
+    <net.ronze.widget.DragGridView 
+        android:layout_width="match_parent"
+        android:layout_height="300dp"/>
+    
+    <net.ronze.widget.DragGridView 
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"/>
+
+</com.nemustech.test.drag_slider.TestDragArea>

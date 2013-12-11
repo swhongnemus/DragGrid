@@ -1,0 +1,412 @@
+package jp.co.nttdocomo.ebook.fragments;
+
+import android.net.Uri;
+import android.os.Bundle;
+import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentActivity;
+import android.support.v4.app.FragmentManager;
+import android.view.LayoutInflater;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.View.OnLayoutChangeListener;
+import android.view.ViewGroup;
+import android.widget.AdapterView.OnItemClickListener;
+import android.widget.Filter;
+import android.widget.FrameLayout;
+import android.widget.FrameLayout.LayoutParams;
+import android.widget.ListView;
+
+import com.nemustech.widget.tf.CoverFlowInfo;
+import com.nemustech.widget.tf.CoverflowManager;
+import com.nemustech.widget.tf.SortBar;
+
+import jp.co.nttdocomo.ebook.BookshelfTitleItemAdapter;
+import jp.co.nttdocomo.ebook.Constants;
+import jp.co.nttdocomo.ebook.EbookApplication;
+import jp.co.nttdocomo.ebook.EbookModel;
+import jp.co.nttdocomo.ebook.ExtraKeys;
+import jp.co.nttdocomo.ebook.R;
+import jp.co.nttdocomo.ebook.Util;
+import jp.co.nttdocomo.ebook.fragments.BookShelfMainFragment.BookShelfMode;
+
+public class TitlesListFragment extends Fragment {
+	@SuppressWarnings("unused")
+	private static final String TAG = "TitlesListFragment";
+
+    private static final String TITLE_LAST_POSITION = "title_last_position";
+    private static final String TITLE_LAST_OFFSET = "title_last_offset";
+    private static final String COVERFLOW_EMPTY = "TitlesListFragment.is_coverflow_empty";
+	protected OnItemClickListener mOnItemClickListener;
+	
+	private ListView mListView;
+	private FrameLayout mEmptyView;
+	private BookshelfTitleItemAdapter mListAdapter;
+	private boolean mShowHeader;
+	private int mPosition = ListView.INVALID_POSITION;
+	private int mOffset = 0;
+	private boolean mIsCoverFlowEmpty;
+	private View mContainer;
+
+	@Override
+	public View onCreateView(LayoutInflater inflater, ViewGroup container,
+			Bundle savedInstanceState) {
+	    if(savedInstanceState != null) {
+			mIsCoverFlowEmpty = savedInstanceState.getBoolean(COVERFLOW_EMPTY, false);
+		} else {
+			Bundle args = getArguments();
+			if(args != null) {
+				mIsCoverFlowEmpty = args.getBoolean(ExtraKeys.IS_EMPTY, false);
+			}
+		}
+		return inflater.inflate(R.layout.bookshelf_titles_listview, null);
+	}
+
+    private View.OnTouchListener mListTouchListener = new View.OnTouchListener() {
+        @Override
+        public boolean onTouch(View v, MotionEvent event) {
+            if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                v.clearFocus();
+                if (v instanceof ListView) {
+                    ListView lv = (ListView)v;
+                    final int cnt = lv.getChildCount();
+                    for (int i = 0; i < cnt; ++i) {
+                        View child = lv.getChildAt(i);
+                        if (child.isPressed()) {
+                            child.setPressed(false);
+                        }
+                    }
+                }                
+            } 
+            return false;
+        }
+    };
+
+	@Override
+	public void onViewCreated(View view, Bundle savedInstanceState) {
+		super.onViewCreated(view, savedInstanceState);
+
+        FragmentActivity activity = getActivity();
+        if(activity == null) return;
+        FragmentManager fm = activity.getSupportFragmentManager();
+        if(fm == null) return;
+		BookShelfMainFragment mainFragment = (BookShelfMainFragment) fm.findFragmentByTag(Constants.FRAG_TAG_MAIN);
+		if(mainFragment != null) {
+			BookShelfMode mode = mainFragment.getBookShelfMode();
+
+			if(mode == BookShelfMode.GRID) 
+				return;
+
+			mListView = (ListView)view.findViewById(R.id.content_list);
+			mEmptyView = (FrameLayout)view.findViewById(R.id.no_contents);
+			if(mShowHeader) {
+				LayoutInflater inflater = LayoutInflater.from(activity);
+				FrameLayout coverFlowContainer = (FrameLayout) inflater.inflate(R.layout.market_recommendation_container, null);
+				mListView.setAdapter(null);
+
+				final View coverFlowView = inflater.inflate(R.layout.market_recommendation_textureview, null);
+				mContainer = coverFlowView;
+
+				int height = getResources().getDimensionPixelSize(R.dimen.coverflow_height);
+				int width = LayoutParams.MATCH_PARENT;
+				if(EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(getActivity())) {
+					height = LayoutParams.MATCH_PARENT;
+					width = getResources().getDimensionPixelSize(R.dimen.coverflow_width);
+				}
+				coverFlowView.setLayoutParams(
+						new FrameLayout.LayoutParams(width, height));
+
+				CoverflowManager.getInstance(getActivity()).setCoverFlowInfo(new CoverFlowInfo(getActivity()));
+				
+				coverFlowContainer.addView(coverFlowView);
+				mListView.addHeaderView(coverFlowContainer);
+
+				SortBar sortbar = (SortBar)inflater.inflate(R.layout.bookshelf_sort_bar, null);
+				sortbar.setAdapter(mListAdapter);
+				sortbar.initSetting();
+				sortbar.setRecommendViewContainer(coverFlowView);
+				sortbar.init();
+				sortbar.applyAdapter();
+				sortbar.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+                    @Override
+                    public void onLayoutChange(View v, int left, int top, int right,
+                            int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                        mListView.post(mSetupListEmptyCmd);
+                    }
+                });
+				
+				mListView.addHeaderView(sortbar);
+				mListView.setDivider(null);
+				mListView.setDividerHeight(0);
+
+				mListView.setOnTouchListener(mListTouchListener);
+				
+	            final EbookApplication app = (EbookApplication) getActivity().getApplicationContext();
+	            final EbookModel model = app.getModel();
+	            if(model.isNeedNewItemBlink()) {
+	                sortbar.blinkNewItem();
+	                model.setNeedNewItemBlink(false);
+	            }
+
+	            updateVisibilities();
+			}
+
+			if (null != mOnItemClickListener) {
+			    mListView.setOnItemClickListener(mOnItemClickListener);
+			}
+			if (null != mListAdapter) {
+			    mListView.setAdapter(mListAdapter);
+			    if (0 != mListAdapter.getFilterBits()) {
+			        mListView.setVisibility(View.INVISIBLE);
+			    }
+			}
+			if (savedInstanceState != null) {
+				mPosition = savedInstanceState.getInt(TITLE_LAST_POSITION, ListView.INVALID_POSITION);
+				mOffset = savedInstanceState.getInt(TITLE_LAST_OFFSET, 0);
+			}
+			if (ListView.INVALID_POSITION == mPosition && getActivity() instanceof Util.StateSupplier) {
+			    Bundle state = ((Util.StateSupplier)getActivity()).getStateBundle();
+                mPosition = state.getInt(TITLE_LAST_POSITION, ListView.INVALID_POSITION);
+                mOffset = state.getInt(TITLE_LAST_OFFSET, 0);
+			}
+
+			mListView.post(mSetupListEmptyCmd);
+		}
+	}
+
+	public void setEmptyState(boolean isEmpty) {
+		android.util.Log.d("hsw_dbg", " setEmptyState");
+		if(mIsCoverFlowEmpty != isEmpty) {
+			mIsCoverFlowEmpty = isEmpty;
+			updateVisibilities();
+		}
+	}
+
+	private void updateVisibilities() {
+		if(mContainer == null)
+			return;
+
+		getActivity().runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				final View empty = mContainer.findViewById(R.id.recomment_empty_view);
+				final View coverflow = mContainer.findViewById(R.id.glsurface_view);
+				if(mIsCoverFlowEmpty) {
+					empty.setVisibility(View.VISIBLE);
+					coverflow.setVisibility(View.INVISIBLE);
+				} else {
+					empty.setVisibility(View.INVISIBLE);
+					coverflow.setVisibility(View.VISIBLE);
+				}
+			}
+		});
+	}
+
+	Runnable mSetupListEmptyCmd = new Runnable() {
+	    public void run() {
+            if (null != mEmptyView && null != mListAdapter && null != getActivity()) {
+                int count = mListAdapter.getCount();
+                mEmptyView.removeAllViews();
+                if (0 == count) {
+                    int contentId = mListAdapter.getEmptyContentId();
+                    if (0 < contentId) {
+                        LayoutInflater inflater = getLayoutInflater(null);
+                        View contentView = inflater.inflate(contentId, mEmptyView);
+                        if (null != contentView.findViewById(R.id.empty_link)) {
+                            View link = contentView.findViewById(R.id.empty_link);
+                            link.setOnClickListener(new View.OnClickListener() {
+                                @Override
+                                public void onClick(View v) {
+                                    Uri uri = Util.getStoreTopUrl(getActivity());
+                                    Util.startWebActivity(getActivity(), uri);
+                                }
+                            });
+                        }
+                    }
+                    mEmptyView.setVisibility(View.VISIBLE);
+                    LayoutParams lp = (LayoutParams) mEmptyView.getLayoutParams();
+                    int h = mListView.getHeight();
+                    if (0 == h) {
+                        mListView.post(this);
+                    }
+                    int y = 0;
+                    SortBar sb = getSortBar();
+                    if (null != sb) {
+                        y += sb.getTop() + sb.getHeight();
+                    }
+                    lp.topMargin = y;
+                    mEmptyView.setLayoutParams(lp);
+                    mEmptyView.requestLayout();
+                } else {
+                    mEmptyView.setVisibility(View.INVISIBLE);
+                }
+            }
+	    }
+	};
+
+	public void setListAdapter(BookshelfTitleItemAdapter adapter) {
+	    BookshelfTitleItemAdapter oldAdapter;
+	    if (null == mListView || !(mListView.getAdapter() instanceof BookshelfTitleItemAdapter)) {
+	        oldAdapter = null;
+	    } else {
+	        oldAdapter = (BookshelfTitleItemAdapter) mListView.getAdapter();
+	    }
+	    if (null != adapter && !adapter.equals(oldAdapter)) {
+    	    mListAdapter = adapter;
+    	    if (null != adapter) {
+    	        adapter.setFilterListener(new Filter.FilterListener() {
+    	            @Override
+    	            public void onFilterComplete(int count) {
+    	                mListView.post(mSetupListEmptyCmd);
+    	                if (mListView != null && mPosition != ListView.INVALID_POSITION) {
+    	                    mListView.setSelectionFromTop(mPosition, mOffset);
+    	                    mPosition = ListView.INVALID_POSITION;
+    	                }
+    	                mListView.setVisibility(View.VISIBLE);
+    	            }
+    	        });
+    	        mSetupListEmptyCmd.run();
+    	    }
+    	    if (null != mListView) {
+                mListView.setVisibility(View.INVISIBLE);
+    	        mListView.setAdapter(adapter);
+    	        adapter.applyFilter();
+    	    }
+	    }
+	}
+
+	public void initHeaderView() {
+	    if(mShowHeader) {
+	        FragmentActivity activity = getActivity();
+            LayoutInflater inflater = LayoutInflater.from(activity);
+            mListView.setAdapter(null);
+
+            SortBar sortbar = (SortBar)inflater.inflate(R.layout.bookshelf_sort_bar, null);
+            sortbar.setAdapter(mListAdapter);
+            if(mContainer != null)
+                sortbar.setRecommendViewContainer(mContainer);
+            sortbar.initSetting();
+            sortbar.init();
+            sortbar.applyAdapter();
+            sortbar.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View v, int left, int top, int right,
+                        int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                    mListView.post(mSetupListEmptyCmd);
+                }
+            });
+
+            mListView.removeHeaderView(mListView.findViewById(R.id.bookshelf_sortbar));
+            mListView.addHeaderView(sortbar);
+            if (null != mListView) {
+                mListView.setAdapter(mListAdapter);
+            }
+
+            final EbookApplication app = (EbookApplication) getActivity().getApplicationContext();
+            final EbookModel model = app.getModel();
+            if(model.isNeedNewItemBlink()) {
+                sortbar.blinkNewItem();
+                model.setNeedNewItemBlink(false);
+            }
+        }
+	}
+
+	public void setOnListItemClickListener(OnItemClickListener listener) {
+		mOnItemClickListener = listener;
+        if (null != mListView) {
+            mListView.setOnItemClickListener(listener);
+        }
+	}
+	
+	public void showCoverFlowHeaderView() {
+		mShowHeader = true;
+	}
+	
+	public SortBar getSortBar() {
+		if(getView() != null) return (SortBar)getView().findViewById(R.id.bookshelf_sortbar);
+		return null;
+	}
+
+	public BookshelfTitleItemAdapter getListAdapter() {
+	    return mListAdapter;
+	}
+
+	@Override
+	public void onPause() {
+		
+		if(mListView != null) {
+			ViewGroup coverflowContainer = (ViewGroup) mListView.findViewById(R.id.coverflow_container);
+			
+			if(coverflowContainer != null) {
+				coverflowContainer.removeAllViews();
+			}
+		}
+		
+		if(mListView != null) {
+			mPosition = mListView.getFirstVisiblePosition();
+			View v = mListView.getChildAt(0);
+			mOffset = (v == null) ? 0 : v.getTop();
+		}
+		if (getActivity() instanceof Util.StateSupplier) {
+		    saveStateImpl(((Util.StateSupplier)getActivity()).getStateBundle());
+		}
+		super.onPause();
+	}
+
+	@Override
+	public void onResume() {
+		
+		if(mShowHeader) {
+			ViewGroup coverflowContainer = (ViewGroup) mListView.findViewById(R.id.coverflow_container);
+			LayoutInflater inflater = LayoutInflater.from(getActivity());
+			//FrameLayout coverFlowContainer = (FrameLayout) inflater.inflate(R.layout.market_recommendation_container, null);
+			//mListView.setAdapter(null);
+
+			final View coverFlowView = inflater.inflate(R.layout.market_recommendation_textureview, null);
+			mContainer = coverFlowView;
+
+			int height = getResources().getDimensionPixelSize(R.dimen.coverflow_height);
+			int width = LayoutParams.MATCH_PARENT;
+			if(EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(getActivity())) {
+				height = LayoutParams.MATCH_PARENT;
+				width = getResources().getDimensionPixelSize(R.dimen.coverflow_width);
+			}
+			coverFlowView.setLayoutParams(
+					new FrameLayout.LayoutParams(width, height));
+
+			CoverflowManager.getInstance(getActivity()).setCoverFlowInfo(new CoverFlowInfo(getActivity()));
+			coverFlowContainer.addView(coverFlowView);
+			//mListView.addHeaderView(coverFlowContainer);
+		}
+		
+        if (ListView.INVALID_POSITION == mPosition && getActivity() instanceof Util.StateSupplier) {
+            Bundle state = ((Util.StateSupplier)getActivity()).getStateBundle();
+            mPosition = state.getInt(TITLE_LAST_POSITION, ListView.INVALID_POSITION);
+            mOffset = state.getInt(TITLE_LAST_OFFSET, 0);
+        }
+		if(mListView != null && mPosition != ListView.INVALID_POSITION && null != mListAdapter) {
+			mListView.setSelectionFromTop(mPosition, mOffset);
+			mPosition = ListView.INVALID_POSITION;
+		}
+		super.onResume();
+	}
+
+	private void saveStateImpl(Bundle bundle) {
+        if(mListView != null) {
+            int position = mListView.getFirstVisiblePosition();
+            View v = mListView.getChildAt(0);
+            int offset = (v == null) ? 0 : v.getTop();
+            bundle.putInt(TITLE_LAST_POSITION, position);
+            bundle.putInt(TITLE_LAST_OFFSET, offset);
+        }
+	}
+
+	@Override
+	public void onSaveInstanceState(Bundle outState) {
+        if (getActivity() instanceof Util.StateSupplier) {
+            saveStateImpl(((Util.StateSupplier)getActivity()).getStateBundle());
+        }
+	    saveStateImpl(outState);
+	    outState.putBoolean(COVERFLOW_EMPTY, mIsCoverFlowEmpty);
+		super.onSaveInstanceState(outState);
+	}
+}

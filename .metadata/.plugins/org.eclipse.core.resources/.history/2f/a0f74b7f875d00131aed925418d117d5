@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="jp.co.nttdocomo.ebook"
+    android:versionCode="20"
+    android:versionName="4.0.2" >
+
+    <uses-sdk
+        android:minSdkVersion="8"
+        android:targetSdkVersion="8" />
+    
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_INTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="jp.co.nttdocomo.ebook.permission.READ" />
+    <uses-permission android:name="jp.co.nttdocomo.ebook.permission.WRITE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 
+    <uses-permission android:name="android.permission.SET_DEBUG_APP" />
+ 	-->
+ 	
+    <supports-screens 
+        android:largeScreens="true"
+        android:xlargeScreens="true"/>
+    
+    <application
+        android:name="jp.co.nttdocomo.ebook.EbookApplication"
+        android:allowBackup="true"
+        android:icon="@drawable/icon"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.Black.NoTitleBar"
+        android:largeHeap="true"
+        android:hardwareAccelerated="true">
+        <activity
+            android:name="jp.co.nttdocomo.ebook.EbookLauncher"
+            android:screenOrientation="sensor"
+            android:launchMode="singleTop"
+            android:label="@string/app_name" >
+        </activity>
+        
+        <activity
+            android:name="jp.co.nttdocomo.ebook.EbookActivity" >
+            <intent-filter android:label="@string/app_name" >
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter android:label="@string/app_intent_name" >
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="dcmbook" />
+            </intent-filter>
+        </activity>
+        
+        <provider
+            android:name="jp.co.nttdocomo.ebook.EbookProvider"
+            android:authorities="jp.co.nttdocomo.ebook"
+            android:exported="false"
+            android:writePermission="jp.co.nttdocomo.ebook.permission.WRITE"
+            android:readPermission="jp.co.nttdocomo.ebook.permission.READ" />
+
+        <!-- HyBook viewer -->
+        <activity
+            android:name="jp.co.nttdocomo.ebook.ViewerActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation"
+            android:screenOrientation="sensor" />
+
+        <!-- BS Hybrid -->
+        <activity
+            android:name="jp.co.celsys.android.bsreader.custom.BSActivity"
+            android:label="@string/app_name"
+            android:configChanges="keyboard|keyboardHidden|orientation"
+            android:screenOrientation="sensor"
+            android:theme="@android:style/Theme.Black.NoTitleBar" >
+        </activity>
+
+        <!-- BS Koma -->
+        <activity
+            android:name="jp.co.celsys.android.bsreaderfors.CallBs"
+            android:configChanges="keyboard|keyboardHidden|orientation"
+            android:screenOrientation="portrait" >
+        </activity>
+
+        <activity
+            android:name="jp.co.celsys.android.bsreaderfors.BSReader"
+            android:configChanges="keyboard|keyboardHidden|orientation"
+            android:label="@string/app_name"
+            android:screenOrientation="portrait"
+            android:hardwareAccelerated="false" >
+        </activity>
+        
+        <!-- Sharp XMDF -->
+        <activity
+            android:name="jp.co.nttdocomo.ebook.SharpXmdfActivity"
+            android:screenOrientation="sensor" 
+            android:hardwareAccelerated="false">
+        </activity>
+        
+        <service
+            android:name="jp.co.nttdocomo.ebook.DownloadService"
+            android:exported="false">
+        </service>
+        
+        <receiver
+            android:name="jp.co.nttdocomo.ebook.ClearNotification"
+            android:exported="true" >
+            <intent-filter>
+	            <action android:name="jp.co.nttdocomo.ebook.CLEAR_NOTIFICATION" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>

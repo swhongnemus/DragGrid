@@ -1,0 +1,402 @@
+package jp.co.nttdocomo.ebook;
+
+import android.content.ContentValues;
+import android.database.Cursor;
+import android.support.v4.app.NotificationCompat;
+import android.util.Log;
+import android.widget.ProgressBar;
+
+import jp.co.nttdocomo.ebook.EbookSettings.Contents;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Set;
+
+public class ContentInfo extends BaseInfo {
+	private static final String TAG = "ContentInfo";
+
+	// json key
+	public static final String CONTENTS_ID = "item_id";
+	public static final String ITEM_NO = "item_no";
+	public static final String ITEM_NAME = "item_nm";
+	public static final String ITEM_TYPE = "item_type";
+	public static final String FILE_NAME = "file_name";
+	public static final String FILE_SIZE = "file_size";
+	public static final String CONTENTS_FORMAT = "book_format_id";
+	public static final String DT_LIMIT = "dl_limit_dt";
+	public static final String DL_DATE = "settlement_dt";
+	public static final String PURCHASE_TARGET_DEVICE_TYPE = "purchase_target_device_type";
+	public static final String DEL_FLG = "del_flg";
+	public static final String CONTENTS_TYPE = "contents_type";
+
+	public long titleId;
+	public String contentId;
+	public long contentNo;
+	public String contentName;
+	public long volumeOrStory;
+	public String fileName;
+	public double fileSize; //  need to be xx.xx 2 digit
+	public long contentFormat;
+	public Date downloadExpiredDate;
+	public Date purchasedDate;
+	public long purchaseTargetDeviceType;
+	public boolean deletedFlag;
+	public int contentsType;
+	
+	//exclude on update
+	public boolean isDownloaded;
+	public int downloadedPosition; 
+	public boolean isRead = false;
+	
+	public boolean isSample = false;
+	private DownloadTaskInfo mDownloadTaskInfo;
+	
+	public class DownloadTaskInfo {
+		public NotificationCompat.Builder notificationBuilder = null;
+
+		public boolean isWaiting = false;
+		public int downloadedSize = 0;
+		public int prevDownloadedSize = 0;
+		public int contentLength = 0;
+		
+		public int retriedCount = 0;
+		public void updateProgressBar(ProgressBar bar) {
+            if (downloadedSize == 0 && !isWaiting) {
+                bar.setIndeterminate(true);
+            } else {
+                bar.setIndeterminate(false);
+                bar.setEnabled(!isWaiting);
+
+                if (downloadedSize == 0) {
+                    bar.setMax(0);
+                    bar.setProgress(0);
+                } else {
+                    bar.setMax(contentLength);
+                    bar.setProgress(downloadedSize);
+                }
+            }
+		}
+	}
+	
+	public static ContentInfo fromJSON(
+			JSONObject contentData, 
+			SimpleDateFormat dateParser, 
+			long titleId,
+			int contentsType) {
+		
+		try {
+			final ContentInfo contentInfo = new ContentInfo();
+			contentInfo.titleId = titleId;
+			contentInfo.contentId = contentData.getString(ContentInfo.CONTENTS_ID);
+			contentInfo.contentNo = contentData.getLong(ContentInfo.ITEM_NO);
+			contentInfo.contentName = contentData.getString(ContentInfo.ITEM_NAME);
+			contentInfo.volumeOrStory = contentData.getLong(ContentInfo.ITEM_TYPE);
+			contentInfo.fileName = contentData.getString(ContentInfo.FILE_NAME);
+			contentInfo.fileSize = contentData.getDouble(ContentInfo.FILE_SIZE);
+			contentInfo.contentFormat = contentData.getLong(ContentInfo.CONTENTS_FORMAT);
+
+			String tempDate = contentData.getString(ContentInfo.DT_LIMIT); 
+			contentInfo.downloadExpiredDate = null;
+			contentInfo.downloadExpiredDate = dateParser.parse(tempDate);
+
+			tempDate = contentData.getString(ContentInfo.DL_DATE); 
+			contentInfo.purchasedDate = null;
+			try {
+				contentInfo.purchasedDate = dateParser.parse(tempDate);
+			} catch (ParseException e) {
+				contentInfo.purchasedDate = null; // Not purchased
+			}
+			
+			contentInfo.purchaseTargetDeviceType = contentData.getLong(ContentInfo.PURCHASE_TARGET_DEVICE_TYPE);
+			String tmpFlag = contentData.getString(ContentInfo.DEL_FLG);
+			contentInfo.deletedFlag = false;
+			if(!("0".equals(tmpFlag))) {
+				contentInfo.deletedFlag = true;
+			}
+			
+			contentInfo.contentsType = contentsType;
+			return contentInfo;		
+		} catch (JSONException e) {
+			Log.e(TAG, " json parse error", e);
+		} catch (ParseException e2) {
+			Log.e(TAG, " dateParser parse error", e2);
+		}
+		return null;
+	}
+	
+	public static ContentInfo createDummyInfo(
+			long titleId, 
+			String contentId, 
+			String contentName, 
+			int contentsType,
+			boolean isSample) {
+		
+		final ContentInfo contentInfo = new ContentInfo();
+		contentInfo.titleId = titleId;
+		contentInfo.contentId = contentId;
+		contentInfo.contentName = contentName;
+		
+		contentInfo.contentsType = contentsType;
+		contentInfo.downloadedPosition = Contents.TYPE_DL_POSITION_EXTERNAL;
+		
+		contentInfo.isDownloaded = false;
+		contentInfo.isRead = false;
+		contentInfo.deletedFlag = false;
+		
+		contentInfo.isSample = isSample;
+		
+		contentInfo.downloadExpiredDate = new Date(Long.MAX_VALUE);
+		
+		return contentInfo;
+	}
+	
+	public static List<ContentInfo> fromCursor(Cursor cursor) {
+		if (cursor == null || cursor.getCount() == 0)
+			return new ArrayList<ContentInfo>();
+		
+		final SimpleDateFormat dateParser = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+		List<ContentInfo> contents = new ArrayList<ContentInfo>();
+		while(cursor.moveToNext()) {
+			
+			ContentInfo contentInfo = new ContentInfo();
+			contentInfo.id = cursor.getLong(cursor.getColumnIndex(Contents.ID));
+			contentInfo.titleId = cursor.getLong(cursor.getColumnIndex(Contents.TITLE_ID));
+			contentInfo.contentId = cursor.getString(cursor.getColumnIndex(Contents.CONTENTS_ID));
+			contentInfo.contentName = cursor.getString(cursor.getColumnIndex(Contents.CONTENTS_NAME));
+			contentInfo.contentNo = cursor.getLong(cursor.getColumnIndex(Contents.CONTENTS_IDX));
+			contentInfo.volumeOrStory = cursor.getLong(cursor.getColumnIndex(Contents.VOL_STORY_FLG));
+			contentInfo.fileName = cursor.getString(cursor.getColumnIndex(Contents.FILE_NAME));
+			contentInfo.fileSize = cursor.getDouble(cursor.getColumnIndex(Contents.FILE_SIZE));
+			contentInfo.contentFormat = cursor.getLong(cursor.getColumnIndex(Contents.CONTENTS_FORMAT));
+			contentInfo.isDownloaded = (cursor.getDouble(cursor.getColumnIndex(Contents.IS_DOWNLOADED)) == 0f ? false : true);
+
+			final String downloadExpredDateStr = cursor.getString(cursor.getColumnIndex(Contents.DL_LIMIT));
+			try {
+				contentInfo.downloadExpiredDate = dateParser.parse(downloadExpredDateStr);
+			} catch (ParseException e) {
+				contentInfo.downloadExpiredDate = null;
+			} catch (NullPointerException e) {
+				contentInfo.downloadExpiredDate = null;
+			}
+			
+			final String purchasedDateStr = cursor.getString(cursor.getColumnIndex(Contents.DL_DATE));
+			try {
+				contentInfo.purchasedDate = dateParser.parse(purchasedDateStr);
+			} catch (ParseException e) {
+				contentInfo.purchasedDate = null;
+			} catch (NullPointerException e) {
+				contentInfo.purchasedDate = null;
+			}
+
+			contentInfo.purchaseTargetDeviceType = cursor.getLong(cursor.getColumnIndex(Contents.PURCHASE_TARGET_DEVICE_TYPE));
+			contentInfo.contentsType = (cursor.getInt(cursor.getColumnIndex(Contents.CONTENTS_TYPE)));
+			contentInfo.isDownloaded = (cursor.getInt(cursor.getColumnIndex(Contents.IS_DOWNLOADED)) == 0)?false:true;
+			contentInfo.downloadedPosition = cursor.getInt(cursor.getColumnIndex(Contents.DL_POSITION));
+			contentInfo.isRead = (cursor.getInt(cursor.getColumnIndex(Contents.IS_READ)) == 0)?false:true;
+			contentInfo.deletedFlag = (cursor.getInt(cursor.getColumnIndex(Contents.IS_DELETED)) == 0)?false:true;
+
+			contents.add(contentInfo);
+		}
+		
+		return contents;
+	}
+	
+	public static List<ContentInfo> fromOldCursor(Cursor cursor) {
+		if (cursor == null || cursor.getCount() == 0)
+			return new ArrayList<ContentInfo>();
+		
+		final SimpleDateFormat dateParser = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+		List<ContentInfo> contents = new ArrayList<ContentInfo>();
+		while(cursor.moveToNext()) {
+			
+			ContentInfo contentInfo = new ContentInfo();
+			contentInfo.id = cursor.getLong(cursor.getColumnIndex(Contents.ID));
+			contentInfo.titleId = cursor.getLong(cursor.getColumnIndex(Contents.TITLE_ID));
+			contentInfo.contentId = cursor.getString(cursor.getColumnIndex(Contents.CONTENTS_ID));
+			contentInfo.contentName = cursor.getString(cursor.getColumnIndex(Contents.CONTENTS_NAME));
+			contentInfo.contentNo = cursor.getLong(cursor.getColumnIndex(Contents.CONTENTS_IDX));
+			contentInfo.volumeOrStory = cursor.getLong(cursor.getColumnIndex(Contents.VOL_STORY_FLG));
+			contentInfo.fileName = cursor.getString(cursor.getColumnIndex(Contents.FILE_NAME));
+			contentInfo.fileSize = cursor.getDouble(cursor.getColumnIndex(Contents.FILE_SIZE));
+			contentInfo.contentFormat = cursor.getLong(cursor.getColumnIndex(Contents.CONTENTS_FORMAT));
+//			contentInfo.isDownloaded = (cursor.getDouble(cursor.getColumnIndex(Contents.IS_DOWNLOADED)) == 0f ? false : true);
+
+			final String downloadExpredDateStr = cursor.getString(cursor.getColumnIndex(Contents.DL_LIMIT));
+			try {
+				contentInfo.downloadExpiredDate = dateParser.parse(downloadExpredDateStr);
+			} catch (ParseException e) {
+				contentInfo.downloadExpiredDate = null;
+			} catch (NullPointerException e) {
+				contentInfo.downloadExpiredDate = null;
+			}
+			
+			final String purchasedDateStr = cursor.getString(cursor.getColumnIndex(Contents.DL_DATE));
+			try {
+				contentInfo.purchasedDate = dateParser.parse(purchasedDateStr);
+			} catch (ParseException e) {
+				contentInfo.purchasedDate = null;
+			} catch (NullPointerException e) {
+				contentInfo.purchasedDate = null;
+			}
+
+			contentInfo.purchaseTargetDeviceType = cursor.getLong(cursor.getColumnIndex(Contents.PURCHASE_TARGET_DEVICE_TYPE));
+//			contentInfo.contentsType = (cursor.getInt(cursor.getColumnIndex(Contents.CONTENTS_TYPE)));
+//			contentInfo.isDownloaded = (cursor.getInt(cursor.getColumnIndex(Contents.IS_DOWNLOADED)) == 0)?false:true;
+//			contentInfo.downloadedPosition = cursor.getInt(cursor.getColumnIndex(Contents.DL_POSITION));
+//			contentInfo.isRead = (cursor.getInt(cursor.getColumnIndex(Contents.IS_READ)) == 0)?false:true;
+//			contentInfo.deletedFlag = (cursor.getInt(cursor.getColumnIndex(Contents.IS_DELETED)) == 0)?false:true;
+
+			contents.add(contentInfo);
+		}
+		
+		return contents;
+	}
+	
+	public void updateAllValues(ContentInfo contentInfo) {
+		titleId = contentInfo.titleId;
+		contentId = contentInfo.contentId;
+		contentNo = contentInfo.contentNo;
+		contentName = contentInfo.contentName;
+		volumeOrStory = contentInfo.volumeOrStory;
+		fileName = contentInfo.fileName;
+		fileSize = contentInfo.fileSize;
+		contentFormat = contentInfo.contentFormat;
+		downloadExpiredDate = contentInfo.downloadExpiredDate;
+		purchasedDate = contentInfo.purchasedDate;
+		purchaseTargetDeviceType = contentInfo.purchaseTargetDeviceType;
+		deletedFlag = contentInfo.deletedFlag;
+		contentsType = contentInfo.contentsType;
+		isDownloaded = contentInfo.isDownloaded;
+		downloadedPosition = contentInfo.downloadedPosition; 
+		isRead = contentInfo.isRead;
+		isSample = contentInfo.isSample;
+		
+		mDownloadTaskInfo = contentInfo.mDownloadTaskInfo;
+	}
+	
+	public void setDownloadTaskInfo(DownloadTaskInfo taskInfo) {
+		mDownloadTaskInfo = taskInfo;
+	}
+	public void createDownloadTaskInfo() {
+		if(mDownloadTaskInfo == null)
+			mDownloadTaskInfo = new DownloadTaskInfo();
+	}
+	
+	public void clearDownloadTaskInfo() {
+		mDownloadTaskInfo = null;
+	}
+	
+	public DownloadTaskInfo getDownloadTaskInfo() {
+		return mDownloadTaskInfo;
+	}
+	
+	public boolean isDownloaded() {
+		return isDownloaded;
+	}
+	
+	@Override
+	public Set<String> excludeOnUpdate() {
+		final Set<String> excludeKeys = super.excludeOnUpdate();
+		excludeKeys.add(Contents.IS_DOWNLOADED);
+		excludeKeys.add(Contents.DL_POSITION);
+		excludeKeys.add(Contents.IS_READ);
+
+		return excludeKeys;
+	}
+
+	@Override
+	public void onAddToDatabase(ContentValues contentValues) {
+		super.onAddToDatabase(contentValues);
+		
+		contentValues.put(Contents.TITLE_ID, titleId);
+		contentValues.put(Contents.CONTENTS_ID, contentId);
+		contentValues.put(Contents.CONTENTS_IDX, contentNo);
+		contentValues.put(Contents.CONTENTS_NAME, contentName);
+		contentValues.put(Contents.VOL_STORY_FLG, volumeOrStory);
+		contentValues.put(Contents.FILE_NAME, fileName);
+		contentValues.put(Contents.FILE_SIZE, fileSize);
+		contentValues.put(Contents.CONTENTS_FORMAT, contentFormat);
+		contentValues.put(Contents.PURCHASE_TARGET_DEVICE_TYPE, purchaseTargetDeviceType);
+		contentValues.put(Contents.CONTENTS_TYPE, contentsType);
+		contentValues.put(Contents.IS_DOWNLOADED, (isDownloaded)?1:0);
+		contentValues.put(Contents.DL_POSITION, downloadedPosition);
+		contentValues.put(Contents.IS_DELETED, (deletedFlag)?1:0);
+		contentValues.put(Contents.IS_READ, isRead);
+		
+		//Dates
+		String tmpDate = null;
+		if (downloadExpiredDate != null) {
+			tmpDate = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").format(downloadExpiredDate);
+		}
+		contentValues.put(Contents.DL_LIMIT, tmpDate);
+		
+		tmpDate = null;
+		if (purchasedDate != null) {
+			tmpDate = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").format(purchasedDate);
+		}
+		contentValues.put(Contents.DL_DATE, tmpDate);
+
+	}
+
+	@Override
+	public String toString() {
+		StringBuffer buffer = new StringBuffer();
+		buffer.append("titleId=").append(titleId);
+		buffer.append(",contentId=").append(contentId);
+		buffer.append(",contentNo=").append(contentNo);
+		buffer.append(",contentName=").append(contentName);
+		buffer.append(",itemType=").append(volumeOrStory);
+		buffer.append(",fileName=").append(fileName);
+		buffer.append(",fileSize=").append(fileSize);
+		buffer.append(",contentFormat=").append(contentFormat);
+		buffer.append(",downloadExpireDate=").append(downloadExpiredDate);
+		buffer.append(",purchasedDate=").append(purchasedDate);
+		buffer.append(",purchaseTargetDeviceType=").append(purchaseTargetDeviceType);
+		buffer.append(",deletedFlag=").append(deletedFlag);
+		buffer.append(",contentsType=").append(contentsType);
+		buffer.append(",isDownloaded=").append(isDownloaded);
+		buffer.append(",isRead=").append(isRead);
+		buffer.append(",downloadedPosition=").append(downloadedPosition);
+		buffer.append(",isSample=").append(isSample);
+		buffer.append("\t hash=").append(super.toString());
+		return buffer.toString();
+	}
+
+	/* (non-Javadoc)
+	 * @see java.lang.Object#hashCode()
+	 */
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result
+				+ ((contentId == null) ? 0 : contentId.hashCode());
+		return result;
+	}
+
+	/* (non-Javadoc)
+	 * @see java.lang.Object#equals(java.lang.Object)
+	 */
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		ContentInfo other = (ContentInfo) obj;
+		if (contentId == null) {
+			if (other.contentId != null)
+				return false;
+		} else if (!contentId.equals(other.contentId))
+			return false;
+		return true;
+	}
+}

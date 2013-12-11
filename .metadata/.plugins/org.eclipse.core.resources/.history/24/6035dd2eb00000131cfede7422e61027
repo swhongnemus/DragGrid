@@ -1,0 +1,781 @@
+package jp.co.nttdocomo.ebook.server;
+
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.ContentValues;
+import android.content.Context;
+import android.content.Intent;
+import android.content.res.Resources;
+import android.os.Bundle;
+import android.os.StatFs;
+import android.os.Vibrator;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.content.LocalBroadcastManager;
+import android.webkit.CookieManager;
+
+import jp.co.nttdocomo.ebook.ClearNotification;
+import jp.co.nttdocomo.ebook.Constants;
+import jp.co.nttdocomo.ebook.ContentInfo;
+import jp.co.nttdocomo.ebook.ContentInfo.DownloadTaskInfo;
+import jp.co.nttdocomo.ebook.DcmLog;
+import jp.co.nttdocomo.ebook.Debug;
+import jp.co.nttdocomo.ebook.EbookApplication;
+import jp.co.nttdocomo.ebook.EbookLauncher;
+import jp.co.nttdocomo.ebook.EbookModel;
+import jp.co.nttdocomo.ebook.EbookPreferences;
+import jp.co.nttdocomo.ebook.EbookSettings.Contents;
+import jp.co.nttdocomo.ebook.ExtraKeys;
+import jp.co.nttdocomo.ebook.R;
+import jp.co.nttdocomo.ebook.SampleInfo;
+import jp.co.nttdocomo.ebook.TitleInfo;
+import jp.co.nttdocomo.ebook.UserInfo;
+import jp.co.nttdocomo.ebook.Util;
+import jp.co.nttdocomo.ebook.fragments.SettingStorage;
+
+import org.apache.http.Header;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpStatus;
+import org.apache.http.NameValuePair;
+import org.apache.http.ParseException;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.BindException;
+import java.net.HttpRetryException;
+import java.net.MalformedURLException;
+import java.net.NoRouteToHostException;
+import java.net.ProtocolException;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.net.UnknownServiceException;
+import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+
+public class DownloadTask extends ServerTask<Map<String, String>> {
+	private static final String TAG = "DownloadTask";
+
+	private ContentInfo mContentInfo;
+	private int mStorePosition;
+	
+	private HttpPost objPost = null;
+	private long mContentLength = 0;
+
+	public static final float K_BYTE = 1024f;
+	private long freeSpace = 0L;
+	private static final int TIME_OUT = 30000;
+
+	private BackgroundDownloadCallback mBackgroundCallback;
+	
+	private boolean mIsRangeDownloaded = false;
+	private boolean mKeepResourcesForBacgkroundDownload = false;
+	
+	private LocalBroadcastManager mBroadcastManager;
+	
+	enum NotifyState { CLEAR, WAIT, DOWNLOADING, DONE, FAILED };
+	NotifyState mNotifyState;
+	
+	public interface BackgroundDownloadCallback {
+		public void onStartBackgroundDownload(ContentInfo contentInfo);
+		
+	    public void onProgressBackgroundDownload(ContentInfo contentInfo);
+	    
+	    public void onFinishBackgroundDownload(ContentInfo contentInfo, boolean done);
+	}
+	
+	public DownloadTask(Context context) {
+		super(context);
+		
+		mBroadcastManager = LocalBroadcastManager.getInstance(context);
+	}
+	
+	public ContentInfo getContentInfo() {
+		return mContentInfo;
+	}
+
+	/**
+	 * Set store position/method
+	 * 
+	 * @param storePosition Values {@link SettingStorage.STORAGE_EXTERNAL}, 
+	 * {@link SettingStorage.STORAGE_INTERNAL}, {@link SettingStorage.STORAGE_NOT_SAVE}
+	 */
+	public void setStorePosition(int storePosition) {
+		mStorePosition = storePosition;
+	}
+
+	@Override
+	public int getApiId() {
+		if(Debug.USE_SHA_256_DOWNLOAD) {
+			if(mIsRangeDownloaded)
+				return ServerInterface.API_CONTENTS_DOWNLOAD_RESUME2;
+			else
+				return ServerInterface.API_CONTENTS_DOWNLOAD2;
+		} else {
+			if(mIsRangeDownloaded)
+				return ServerInterface.API_CONTENTS_DOWNLOAD_RESUME;
+			else 
+				return ServerInterface.API_CONTENTS_DOWNLOAD;
+		}
+	}
+	
+	public void setDownloadProgressCallBack(BackgroundDownloadCallback callback) {
+		mBackgroundCallback = callback;
+	}
+	
+	public void setKeepResoucesForBackgroundDownload(boolean keepResource) {
+		mKeepResourcesForBacgkroundDownload = keepResource;
+	}
+
+	@Override
+	public ServerResult<Map<String, String>> parseResponse(
+			IServerResponseCallback callback, Map<String, String> request) {
+		Map<String, String> result = null;
+
+		final long titleId = Long.valueOf(request.get(TitleInfo.TITLE_ID));
+		final String contentId = request.get(ContentInfo.CONTENTS_ID);
+		final boolean isSample = "1".equals(request.get(ExtraKeys.SAMPLE_FLG))?true:false;
+		final EbookApplication app = (EbookApplication)getContext().getApplicationContext();
+		
+		if(contentId != null && contentId.length() != 0)
+			mContentInfo = app.getModel().findContentInfoById(titleId, contentId);
+
+		if(mContentInfo == null && isSample) {
+			SampleInfo sampleInfo = app.getModel().findSampleInfo(titleId, contentId);
+			if(sampleInfo != null) {
+				mContentInfo = app.getModel().getTemporarySamplInfoForDownloads();
+			} else {
+				//TODO
+				return ServerResult.createErrorResult(999);
+			}
+		}
+		
+		if (isCancelled()) {
+			return ServerResult.createNormalResult();
+		}
+		
+		if(mContentInfo.getDownloadTaskInfo() != null)
+			mStorePosition = mContentInfo.downloadedPosition;
+		
+		mContentInfo.createDownloadTaskInfo();
+		mNotifyState = NotifyState.WAIT;
+		notifyDownloadProgress();
+		if(mBackgroundCallback != null) {
+			mBackgroundCallback.onStartBackgroundDownload(mContentInfo);
+		}
+		
+		Intent startIntent = new Intent(Constants.ACTION_UPDATE_DOWNLOAD_START);
+		startIntent.putExtra(TitleInfo.TITLE_ID, mContentInfo.titleId);
+		startIntent.putExtra(ExtraKeys.CONTENTS_ID, mContentInfo.contentId);
+		mBroadcastManager.sendBroadcast(startIntent);
+		try {
+			result = fileDownload();
+		} catch (ResponseErrorException e) {
+			result = new HashMap<String, String>();
+			result.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.RESPONSE_FAILED));
+		} catch (IOException e) {
+			result = new HashMap<String, String>();
+			if (Util.isAirPlaneMode(getContext())) {
+				result.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.RESPONSE_AIRPLAIN_MODE));
+			} else {
+				result.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.RESPONSE_FAILED));
+			}
+		} finally {
+			String errorIdInString = (result != null)?result.get(RESULT_KEY_ERROR):null;
+			if(errorIdInString != null) {
+				final boolean userCancel = errorIdInString.equals(String.valueOf(HttpCommunicationService.USER_CANCEL));
+				int errorId;
+				try {
+					errorId = Integer.valueOf(errorIdInString);
+				} catch (NumberFormatException e) {
+					errorId = 0;
+				}
+				
+				mContentInfo.downloadedPosition = mStorePosition;
+				
+				Intent finishIntent = new Intent(Constants.ACTION_UPDATE_DOWNLOAD_FINISHED); 
+				finishIntent.putExtra(TitleInfo.TITLE_ID, mContentInfo.titleId);
+				finishIntent.putExtra(ExtraKeys.CONTENTS_ID, mContentInfo.contentId);
+				mBroadcastManager.sendBroadcast(finishIntent);
+
+				if(!mKeepResourcesForBacgkroundDownload) {
+					final String filePath = result.get(RESULT_FILE_PATH);
+					// Delete file & No update
+					if(filePath != null) {
+						Util.removeFile(filePath);
+					}
+
+					if(userCancel) {
+						mNotifyState = NotifyState.CLEAR;
+					} else {
+						mNotifyState = NotifyState.FAILED;
+					}
+					notifyDownloadProgress();
+					mContentInfo.clearDownloadTaskInfo(false);
+					if(sendCompleteRequest(mContentInfo) == HttpCommunicationService.RESPONSE_OK) 
+						return ServerResult.createErrorResult(HttpCommunicationService.RESPONSE_FAILED);
+				} else {
+					mNotifyState = NotifyState.DOWNLOADING;
+					DownloadTaskInfo taskInfo = mContentInfo.getDownloadTaskInfo();
+					if(taskInfo.notificationBuilder == null)
+						taskInfo.notificationBuilder = createNotificationBuilder(mContentInfo, mNotifyState);
+					taskInfo.notificationBuilder.setContentText(
+							getContext().getResources().getString(R.string.notification_download_fail));
+					notifyDownloadProgress();
+					
+					NotificationManager manager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+					manager.notify((int)mContentInfo.id, taskInfo.notificationBuilder.build());
+				}
+
+				if(!userCancel)
+					return ServerResult.createErrorResult(errorId);
+			}
+		}
+		
+		// Update accurate file size
+		final String fileSize = result.get(ExtraKeys.FILE_SIZE);
+		try {
+			mContentInfo.fileSize = (double)(Double.parseDouble(fileSize) / K_BYTE);
+		} catch (NullPointerException e) {
+			DcmLog.d(TAG, "FileSize parse exception");
+		}
+
+		return ServerResult.createNormalResult();
+	}
+
+	public void setContentLength(long length) {
+		this.mContentLength = length;
+	}
+
+	private Map<String, String> fileDownload() throws ResponseErrorException, IOException {
+		final ContentInfo contentInfo = mContentInfo;
+		final DownloadTaskInfo taskInfo = contentInfo.getDownloadTaskInfo();
+
+		final int downloadPosition = EbookPreferences.getInt(EbookPreferences.DOWNLOAD_METHOD_SELECTION, SettingStorage.STORAGE_ASK);
+		if(downloadPosition != SettingStorage.STORAGE_ASK) {
+			mStorePosition = downloadPosition;
+		}
+		
+		String storeFolderPath = Util.getDownloadedFolder(getContext(), mStorePosition);
+		if(storeFolderPath == null || "".equals(storeFolderPath)) {
+			//Use internal instead
+			storeFolderPath = Util.getInSideUserSavePath(getContext());
+			mStorePosition = SettingStorage.STORAGE_INTERNAL;
+		}
+
+		String filePath = storeFolderPath + File.separator + contentInfo.contentId;
+		StatFs fs = new StatFs(storeFolderPath);
+
+		long bkSize = fs.getBlockSize();
+		long avaBlocks = fs.getAvailableBlocks();
+
+		freeSpace = bkSize * avaBlocks;
+
+		DecimalFormat format = new DecimalFormat("0000000000");
+		Map<String, String> requestParam = new HashMap<String, String>();
+
+		requestParam.put("title_id", format.format(contentInfo.titleId));
+		requestParam.put("item_id", contentInfo.contentId);
+		requestParam.put("imei", UserInfo.getImei(getContext())); //TODO
+		if (contentInfo.isSample) {
+			requestParam.put("sample_flg", "1");
+		} else {
+			requestParam.put("sample_flg", "0");
+			requestParam.put("contents_format", String.valueOf(contentInfo.contentFormat));
+		}
+		
+		int responseCode = 0;
+		int BUFFER_SIZE = 10240;
+
+		String contentsFormat = null;
+
+		Map<String, String> resultMap = new HashMap<String, String>();
+		String uri;
+		int resumeSize = 0;
+		File tmpFile = new File(filePath.concat(Constants.FILE_TMP_EXT));
+		
+		if (tmpFile.exists() && tmpFile.length() > 0 && mContentLength == 0) {
+			Util.removeFile(tmpFile.getAbsolutePath());
+		}
+		
+		if (tmpFile.exists() && tmpFile.length() > 96) {
+			mIsRangeDownloaded = true;
+			resumeSize = (int) tmpFile.length();
+			uri = ServerInterface.getApiUrl(getContext(), getApiId());
+			
+			objPost = new HttpPost(uri);
+			objPost.setHeader("Range", String.format("bytes=%d-%d", resumeSize, mContentLength));
+			taskInfo.downloadedSize = resumeSize;
+		} else {
+			mIsRangeDownloaded = false;
+			tmpFile.delete();
+			tmpFile.createNewFile();
+			uri = ServerInterface.getApiUrl(getContext(), getApiId());
+			objPost = new HttpPost(uri);
+		}
+		
+		DefaultHttpClient hClient = new DefaultHttpClient();
+		List<NameValuePair> objValuePairs = new ArrayList<NameValuePair>(2);
+		
+		objPost.setEntity(new UrlEncodedFormEntity(objValuePairs, "UTF-8"));
+
+		HttpParams params = hClient.getParams();
+		HttpConnectionParams.setConnectionTimeout(params, TIME_OUT);
+		HttpConnectionParams.setSoTimeout(params, TIME_OUT * 10);
+		params.setParameter("http.useragent",
+				HttpCommunicationService.getUserAgent(getContext()));
+		
+		if (requestParam.containsKey("contents_format")) {
+			contentsFormat = requestParam.get("contents_format");
+			requestParam.remove("contents_format");
+		}
+
+		if (requestParam.size() > 0) {
+			List<NameValuePair> nameValuePair = new ArrayList<NameValuePair>();
+			Iterator<Entry<String, String>> ite = requestParam.entrySet().iterator();
+			while (ite.hasNext()) {
+				Entry<String, String> entry = ite.next();
+				nameValuePair.add(new BasicNameValuePair(entry.getKey(), entry.getValue()));
+			}
+			objPost.setEntity(new UrlEncodedFormEntity(nameValuePair));
+		}
+
+		CookieManager cookieManager = CookieManager.getInstance();
+		if (cookieManager.hasCookies() || cookieManager.getCookie(uri) != null) {
+			objPost.setHeader("Cookie", cookieManager.getCookie(uri));
+		}
+
+		UsernamePasswordCredentials user = new UsernamePasswordCredentials("sol", "sol01");
+		AuthScope scope = new AuthScope(null, -1);
+		hClient.getCredentialsProvider().setCredentials(scope, user);
+
+		HttpResponse hResp = hClient.execute(objPost);
+
+		if (isCancelled()) {
+			objPost.abort();
+			resultMap.put("file_name", tmpFile.getAbsolutePath());
+			if(!mKeepResourcesForBacgkroundDownload)
+				throw new ResponseErrorException("0");
+			else {
+				resultMap.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.USER_CANCEL));
+				return resultMap;
+			}
+		}
+
+		responseCode = hResp.getStatusLine().getStatusCode();
+		if (freeSpace < hResp.getEntity().getContentLength()) {
+			Util.removeFile(tmpFile.getAbsolutePath());
+			throw new ResponseErrorException(String.valueOf(50));
+		}
+
+		if (responseCode == HttpStatus.SC_OK || responseCode == HttpStatus.SC_PARTIAL_CONTENT) {
+			int fileSize = (int) (hResp.getEntity().getContentLength() / K_BYTE);
+			taskInfo.maxProgressSize = fileSize; 
+			
+			HashMap<String, String> headerMap = new HashMap<String, String>();
+			for(Header header : hResp.getAllHeaders()) {
+				headerMap.put(header.getName(), header.getValue());
+			}
+
+			Header[] contentLengths = hResp.getHeaders("Content-Length");
+			int contentLength = 0;
+			if(contentLengths != null && contentLengths.length > 0) {
+				contentLength = Integer.valueOf(contentLengths[0].getValue()) - 1;
+				taskInfo.contentLength = contentLength;
+			}
+
+			resultMap.put(ExtraKeys.FILE_SIZE, String.valueOf(fileSize));
+			Header[] disposition = hResp.getHeaders("Content-Disposition");
+			if(disposition != null && disposition.length > 0) {
+				String attachment = disposition[0].getValue();
+				String fileName = attachment.substring(attachment.lastIndexOf("filename=") + 10, attachment.length() - 1);
+				resultMap.put(ExtraKeys.BOOK_FILE_NAME, fileName);
+				
+				if(contentInfo.isSample)
+					contentInfo.fileName = fileName;
+			}
+			Header[] bookType = hResp.getHeaders("BookType");
+			if(bookType != null && bookType.length > 0) {
+				resultMap.put(ExtraKeys.BOOK_TYPE, bookType[0].getValue());
+				if(contentInfo.isSample)
+					contentInfo.contentsType = Integer.valueOf(bookType[0].getValue());
+			}
+
+			Header[] bookFormat = hResp.getHeaders("BookFormat");
+			if(bookFormat != null && bookFormat.length > 0) {
+				if(contentInfo.isSample) {
+					try {
+						contentInfo.contentFormat = Long.valueOf(bookFormat[0].getValue());
+					} catch (NumberFormatException e) {
+						
+					}
+				}
+				if (contentsFormat != null) {
+					if (!bookFormat[0].getValue().equals(contentsFormat)) {
+						throw new ResponseErrorException("3978");
+					}
+				}
+				resultMap.put(ExtraKeys.BOOK_FORMAT, bookFormat[0].getValue());
+			}
+			
+			Header[] errorCode = hResp.getHeaders("Error-Code");
+			if(errorCode != null && errorCode.length > 0) {
+				String errorString = errorCode[0].getValue();
+				if (!RESPONSE_CODE_OK.equals(errorString)) {
+					if(RESPONSE_CODE_FILE_NOT_FOUND.equals(errorString)
+							&& contentInfo.contentFormat == Constants.CONTENTS_BOOK_FORMAT_BS
+							&& contentInfo.isSample) {
+						mContentInfo.isDownloaded = true;
+						mContentInfo.clearDownloadTaskInfo(true);
+						Intent finishIntent = new Intent(Constants.ACTION_UPDATE_DOWNLOAD_FINISHED); 
+						finishIntent.putExtra(TitleInfo.TITLE_ID, contentInfo.titleId);
+						finishIntent.putExtra(ExtraKeys.CONTENTS_ID, contentInfo.contentId);
+						mBroadcastManager.sendBroadcast(finishIntent);
+
+						final boolean vibrate = EbookPreferences.getBoolean(EbookPreferences.SETTING_VIBRATION, true);
+						if(vibrate) {
+							final Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+							vibrator.vibrate(Constants.VIBRATE_TIME);
+						}
+
+						final EbookApplication app = (EbookApplication)getContext().getApplicationContext();
+						app.getModel().initSubTitlesList();
+
+						return resultMap;
+					} else {
+						Util.removeFile(tmpFile.getAbsolutePath());
+
+						final String code = errorCode[0].getValue();
+						if(RESPONSE_CODE_FILE_NOT_FOUND.equals(code)) {
+							resultMap.put(RESULT_KEY_ERROR, RESPONSE_CODE_FILE_NOT_FOUND);
+							return resultMap;
+						} else if(RESPONSE_CODE_SERVER_MAINTENANCE.equals(code)) {
+							resultMap.put(RESULT_KEY_ERROR, RESPONSE_CODE_SERVER_MAINTENANCE);
+							return resultMap;
+						} else if(HttpCommunicationService.ERROR_CODE_AUTH_ERROR.equals(code)) {
+							resultMap.put(RESULT_KEY_ERROR, HttpCommunicationService.ERROR_CODE_AUTH_ERROR);
+							return resultMap;
+						}
+						throw new ResponseErrorException(errorCode[0].getValue());
+					}
+				}
+			} else {
+				if (resumeSize == 0) {
+					Util.removeFile(tmpFile.getAbsolutePath());
+					throw new ResponseErrorException(String.valueOf(HttpCommunicationService.RESPONSE_FAILED));
+				}
+			}
+			
+			if (resumeSize != 0) {
+				if (resumeSize == mContentLength) {
+					return resultMap;
+				}
+				taskInfo.maxProgressSize = (int) ((taskInfo.contentLength + resumeSize) / K_BYTE);
+				if (taskInfo.contentLength + resumeSize != mContentLength) {
+					throw new ResponseErrorException(String.valueOf(3978));
+				}
+			}
+
+			InputStream is = hResp.getEntity().getContent();
+			BufferedInputStream in = new BufferedInputStream(is, BUFFER_SIZE);
+			BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(tmpFile, true), BUFFER_SIZE);
+			try {
+				taskInfo.downloadedSize = resumeSize;
+				byte buf[] = new byte[BUFFER_SIZE];
+				int size = -1;
+				mNotifyState = NotifyState.DOWNLOADING;
+				while ((size = in.read(buf)) != -1) {
+					if (isCancelled()) {
+						objPost.abort();
+						throw new InterruptedException();
+					}
+					out.write(buf, 0, size);
+					out.flush();
+					taskInfo.downloadedSize += size;
+					if(taskInfo != null) {
+						taskInfo.progress = (int)(taskInfo.downloadedSize / K_BYTE);
+					}
+					
+					final int minNotifyAmount = taskInfo.maxProgressSize / 100;
+					if((taskInfo.progress - taskInfo.prevProgress) > minNotifyAmount) {
+						notifyDownloadProgress();
+						
+						if(mBackgroundCallback != null) {
+							mBackgroundCallback.onProgressBackgroundDownload(contentInfo);
+						}
+
+						Intent progressIntent = new Intent(Constants.ACTION_UPDATE_DOWNLOAD_PROGRESS); 
+						progressIntent.putExtra(TitleInfo.TITLE_ID, contentInfo.titleId);
+						progressIntent.putExtra(ExtraKeys.CONTENTS_ID, contentInfo.contentId);
+						mBroadcastManager.sendBroadcast(progressIntent);
+						
+						taskInfo.prevProgress = taskInfo.progress;
+					}
+				}
+				if (in != null) {
+					in.close();
+					in = null;
+				}
+				if (out != null) {
+					out.close();
+					out = null;
+				}
+				
+				if(!isCancelled() && resultMap.get(RESULT_KEY_ERROR) == null) {
+					mNotifyState = NotifyState.DONE;
+					notifyDownloadProgress();
+					
+					ContentValues isUpdatedValues = new ContentValues();
+					isUpdatedValues.put(Contents.IS_DOWNLOADED, 1);
+					isUpdatedValues.put(Contents.DL_POSITION, mStorePosition);
+					EbookModel.updateToDatabase(getContext(), Contents.CONTENT_URI, contentInfo.id, isUpdatedValues);
+					
+					mContentInfo.isDownloaded = true;
+					mContentInfo.downloadedPosition = mStorePosition;
+
+					if(mBackgroundCallback != null)
+						mBackgroundCallback.onFinishBackgroundDownload(contentInfo, true);
+					
+					mContentInfo.clearDownloadTaskInfo(true);
+					
+					Intent finishIntent = new Intent(Constants.ACTION_UPDATE_DOWNLOAD_FINISHED); 
+					finishIntent.putExtra(TitleInfo.TITLE_ID, contentInfo.titleId);
+					finishIntent.putExtra(ExtraKeys.CONTENTS_ID, contentInfo.contentId);
+					mBroadcastManager.sendBroadcast(finishIntent);
+					
+					//Rename to same partition
+					tmpFile.renameTo(new File(storeFolderPath + File.separator + contentInfo.fileName));
+					
+					final boolean vibrate = EbookPreferences.getBoolean(EbookPreferences.SETTING_VIBRATION, true);
+					if(vibrate) {
+						final Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+						vibrator.vibrate(Constants.VIBRATE_TIME);
+					}
+
+					final EbookApplication app = (EbookApplication)getContext().getApplicationContext();
+					app.getModel().initSubTitlesList();
+					app.getModel().setTemporarySampleInfoForDownloads(null);
+					
+					if(sendCompleteRequest(mContentInfo) == HttpCommunicationService.RESPONSE_OK)
+						throw new ResponseErrorException();
+				}
+			} catch (BindException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (HttpRetryException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (MalformedURLException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (NoRouteToHostException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (ProtocolException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (UnknownHostException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (UnknownServiceException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (SocketTimeoutException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (InterruptedException e) {
+				resultMap.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.USER_CANCEL));
+				return resultMap;
+			} catch (SocketException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} catch (IOException e) {
+				e.printStackTrace();
+				Util.removeFile(filePath);
+				resultMap.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.RESPONSE_NOT_SPACE));
+				return resultMap;
+			} catch (NullPointerException e) {
+				e.printStackTrace();
+				Util.removeFile(filePath);
+				return resultMap;
+			} catch (ResponseErrorException e) {
+				e.printStackTrace();
+				return getExceptionMap();
+			} finally {
+				if (in != null) {
+					try {
+						in.close();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				}
+				if (out != null) {
+					try {
+						out.close();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				}
+				if (hResp != null && hResp.getEntity() != null) {
+					try {
+						hResp.getEntity().consumeContent();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				}
+				if (hClient != null) {
+					hClient.getConnectionManager().shutdown();
+				}
+				if(tmpFile != null) {
+					resultMap.put(RESULT_FILE_PATH, tmpFile.getAbsolutePath());
+				}
+			}
+		} else {
+			throw new ResponseErrorException(String.valueOf(RESPONSE_HTTP_ERROR));
+		}
+		return resultMap;
+	}
+	
+	private int sendCompleteRequest(ContentInfo contentInfo) {
+		final String completeUri = ServerInterface.getApiUrl(getContext(), ServerInterface.API_CONTENTS_DOWNLOAD_COMPLETE);
+		Map<String, String> completeRequest = new HashMap<String, String>();
+		completeRequest.put(HttpCommunicationService.URI, completeUri);
+		completeRequest.put(TitleInfo.TITLE_ID, String.valueOf(contentInfo.titleId));
+		completeRequest.put(ContentInfo.CONTENTS_ID, contentInfo.contentId);
+		completeRequest.put(ExtraKeys.BOOK_FORMAT, String.valueOf(contentInfo.contentFormat));
+		completeRequest.put(ExtraKeys.SAMPLE_FLG, (contentInfo.isSample)?"1":"0");
+		try {
+			HttpCommunicationService.postRequest(completeRequest, true, getContext());
+		} catch (ParseException e) {
+			return HttpCommunicationService.RESPONSE_FAILED;
+		} catch (Exception e) {
+			return HttpCommunicationService.RESPONSE_FAILED;
+		}
+		
+		return HttpCommunicationService.RESPONSE_OK;
+	}
+	
+	private void sendDownloadTaskIntent(String action, long titleId, String contentId) {
+		Intent finishIntent = new Intent(action); 
+		finishIntent.putExtra(TitleInfo.TITLE_ID, titleId);
+		finishIntent.putExtra(ExtraKeys.CONTENTS_ID, contentId);
+		mBroadcastManager.sendBroadcast(finishIntent);
+	}
+
+	private Map<String, String> getExceptionMap() {
+		Map<String, String> resultMap = new HashMap<String, String>();
+		if (Util.isAirPlaneMode(getContext())) {
+			resultMap.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.RESPONSE_AIRPLAIN_MODE));
+		} else {
+			resultMap.put(RESULT_KEY_ERROR, String.valueOf(HttpCommunicationService.RESPONSE_FAILED));
+		}
+		return resultMap;
+	}
+	
+	public void cancelDownloadNotification() {
+		if(mContentInfo == null)
+			return;
+		
+		NotificationManager manager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+		manager.cancel((int)mContentInfo.id);
+	}
+	
+	private boolean needNotifyDownload() {
+		if(mBackgroundCallback != null)
+			return true;
+		else
+			return false;
+	}
+	
+	private NotificationCompat.Builder createNotificationBuilder(ContentInfo contentInfo, NotifyState state) {
+		final NotificationCompat.Builder builder = new NotificationCompat.Builder(getContext());
+		Intent intent = new Intent(getContext(), EbookLauncher.class);
+		intent.setAction(Intent.ACTION_VIEW);
+		if(state == NotifyState.DONE || state == NotifyState.FAILED) {
+			Bundle bundle = new Bundle();
+			bundle.putLong(TitleInfo.TITLE_ID, contentInfo.titleId);
+			bundle.putString(ContentInfo.CONTENTS_ID, contentInfo.contentId);
+			intent.putExtras(bundle);
+		}
+		
+		PendingIntent pendingIntentClick = PendingIntent.getActivity(
+				getContext(), (int)contentInfo.id, intent, PendingIntent.FLAG_ONE_SHOT);
+
+		Intent deleteIntent = new Intent(ClearNotification.NOTIFICATION_CLEAR_ACTION);
+		PendingIntent pendingDelete = PendingIntent.getBroadcast(getContext(), 0, deleteIntent, PendingIntent.FLAG_ONE_SHOT);
+
+		builder.setSmallIcon(R.drawable.icon)
+		.setContentIntent(pendingIntentClick)
+		.setLargeIcon(Util.getTitleImage(getContext(), contentInfo.titleId, contentInfo.contentId))
+		.setContentTitle("Downloading : " + mContentInfo.contentName)
+		.setDeleteIntent(pendingDelete)
+		.setAutoCancel(true);
+
+		return builder;
+	}
+	
+	private void notifyDownloadProgress() {
+		final ContentInfo contentInfo = mContentInfo;
+		
+		if(!needNotifyDownload() || contentInfo == null)
+			return; //TODO Throw?
+		
+		if(mNotifyState == NotifyState.CLEAR) {
+			NotificationManager manager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+			manager.cancel((int)contentInfo.id);
+			return;
+		}
+		
+		final Resources res = getContext().getResources();
+		final DownloadTaskInfo taskInfo = contentInfo.getDownloadTaskInfo();
+		if(taskInfo.notificationBuilder == null)
+			taskInfo.notificationBuilder = createNotificationBuilder(mContentInfo, mNotifyState);
+
+		String stateString = null;
+		switch(mNotifyState) {
+			case WAIT:
+				stateString = res.getString(R.string.notification_wait_download);
+				taskInfo.notificationBuilder.setProgress(0, 0, true);
+				break;
+			case DOWNLOADING:
+				stateString = null;
+				taskInfo.notificationBuilder.setProgress(taskInfo.maxProgressSize, taskInfo.progress, false);
+				break;
+			case DONE:
+				stateString = res.getString(R.string.notification_download_complete);
+				taskInfo.notificationBuilder.setProgress(0, 0, false);
+				break;
+			case FAILED:
+				stateString = res.getString(R.string.notification_download_fail);
+				taskInfo.notificationBuilder.setProgress(0, 0, false);
+				break;
+			case CLEAR:
+				break;
+		}
+		if(stateString != null)
+			taskInfo.notificationBuilder.setContentText(stateString);
+
+		NotificationManager manager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+		if(mNotifyState != NotifyState.CLEAR) {
+			manager.notify((int)contentInfo.id, taskInfo.notificationBuilder.build());
+		} else {
+			manager.cancel((int)contentInfo.id);
+		}
+	}
+}

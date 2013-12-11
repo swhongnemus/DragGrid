@@ -1,0 +1,911 @@
+package jp.co.nttdocomo.ebook;
+
+import android.app.Dialog;
+import android.app.ProgressDialog;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
+import android.os.Bundle;
+import android.os.Handler;
+import android.preference.PreferenceManager;
+import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentActivity;
+import android.support.v4.app.FragmentManager;
+import android.support.v4.app.FragmentTransaction;
+import android.util.Log;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.webkit.CookieManager;
+import android.webkit.WebView;
+import android.widget.AdapterView;
+import android.widget.AdapterView.OnItemClickListener;
+import android.widget.AdapterView.OnItemSelectedListener;
+import android.widget.BaseAdapter;
+import android.widget.Spinner;
+
+import com.nemustech.widget.tf.ActionBar;
+import com.nemustech.widget.tf.ActionBar.onActionBarClickListener;
+
+import jp.co.nttdocomo.ebook.BookShelfSync.BookShelfSyncCallback;
+import jp.co.nttdocomo.ebook.BookThumbnailDownloadSync.BookThumbnailDownloadSyncCallback;
+import jp.co.nttdocomo.ebook.auth.CertificationChromeClient;
+import jp.co.nttdocomo.ebook.auth.CertificationClient;
+import jp.co.nttdocomo.ebook.auth.ServerInterface;
+import jp.co.nttdocomo.ebook.auth.UserLoginCallback;
+import jp.co.nttdocomo.ebook.download.DownloadTask;
+import jp.co.nttdocomo.ebook.download.DownloadTask.DownloadProgressCallback;
+import jp.co.nttdocomo.ebook.fragments.ContentsDetailFragment;
+import jp.co.nttdocomo.ebook.fragments.DeleteListFragment;
+import jp.co.nttdocomo.ebook.fragments.EbookStoreFragment;
+import jp.co.nttdocomo.ebook.fragments.RecommendFragment;
+import jp.co.nttdocomo.ebook.fragments.TitlesGridFragment;
+import jp.co.nttdocomo.ebook.fragments.TitlesListFragment;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+public class MainActivity extends FragmentActivity 
+				implements UserLoginCallback, BookShelfSyncCallback, BookThumbnailDownloadSyncCallback, DownloadProgressCallback {
+	
+	private static final String TAG = "MainActivity";	
+	public static final boolean DEBUG = true; 
+	public static final boolean TEST_DOWNLOAD_CONTENT = false;
+	public static final boolean USE_STAGING_SERVER = true;
+	
+	private static final String KEY_STATE_EBOOK_MODE = "state_ebook_mode";
+	private static final String KEY_STATE_BOOKSHELF_MODE = "state_bookshelf_mode";
+	private static final String KEY_RECENTLY_READ_CONTENT = "recently_read_content";
+	
+	public static final String FRAG_TAG_GRID = "grid_titles_fragment";
+	public static final String FRAG_TAG_LIST = "list_titles_fragment";
+	public static final String FRAG_TAG_LIST_MULTI = "multi_list_titles_fragment"; // To use in multipane
+	public static final String FRAG_TAG_DETAIL = "detail_contents_fragment";
+	public static final String FRAG_TAG_STORE = "store_fragment";
+	public static final String FRAG_TAG_RECOMMEND = "recommend_fragment";
+	public static final String FRAG_TAG_DELETE_LIST = "frag_tag_delete_list";
+
+	private Dialog mDialog;
+	private boolean mDocomoIdFlg = false;
+
+	private View mBookShelfContainer;
+	private WebView mAuthView;
+	private ActionBar mActionBar;
+	
+	private DownloadTask mDownloadTask;
+	private Handler mHandler;
+	
+    abstract class EbookStateObj {
+        abstract void enter();
+        abstract void exit();
+    }
+	
+	public enum EbookState {
+		BOOKSHELF_MAIN {
+			@Override
+			protected EbookStateObj getState(MainActivity stateContext) {
+				return stateContext.mStateMain;
+			}
+		},
+		CONTENTS_DETAIL {
+			@Override
+			protected EbookStateObj getState(MainActivity stateContext) {
+				return stateContext.mStateContentDetail;
+			}
+		},
+		STORE {
+			@Override
+			protected EbookStateObj getState(MainActivity stateContext) {
+				return stateContext.mStateStore;
+			}
+		},
+		DELETE_LIST {
+			@Override
+			protected EbookStateObj getState(MainActivity stateContext) {
+				return stateContext.mStateDeleteList;
+			}
+		};
+
+		protected abstract EbookStateObj getState(MainActivity stateContext);
+	};
+	
+	class EbookStateMain extends EbookStateObj {
+		
+		private void showGrid(List<TitleInfo> titleInfoList) {
+			final FragmentManager fm = getSupportFragmentManager();
+
+			TitlesGridFragment contentFragment = (TitlesGridFragment) fm.findFragmentByTag(FRAG_TAG_GRID);
+			Fragment recFragment = fm.findFragmentByTag(FRAG_TAG_RECOMMEND);
+
+			FragmentTransaction ft = fm.beginTransaction();
+			if(null == contentFragment) {
+				contentFragment = new TitlesGridFragment();
+				ft.replace(R.id.frag_bookshelf_contents, contentFragment, FRAG_TAG_GRID);
+			} else {
+				ft.show(contentFragment);
+			}
+			
+			if(null == recFragment) {
+				recFragment = new RecommendFragment();
+				ft.replace(R.id.frag_market_recommendation, recFragment, FRAG_TAG_RECOMMEND);
+			} else {
+				ft.show(recFragment);
+			}
+			
+			if(titleInfoList != null) {
+				BookshelfTitleItemAdapter adapter = contentFragment.getGridAdapter();
+				if(adapter == null)
+					adapter = new BookshelfTitleItemAdapter(MainActivity.this, 0, titleInfoList, BookShelfMode.GRID);
+				contentFragment.setGridAdapter(adapter);
+				
+				String contentId = getRecentlyReadContentId();
+				adapter.setRecentlyReadTitle(titleInfo);
+				contentFragment.setOnGridItemClickListener(mOnTitleClickListener);
+			}
+			
+			ft.commitAllowingStateLoss();
+		}
+		
+		private void showList(List<TitleInfo> titleInfoList) {
+			final FragmentManager fm = getSupportFragmentManager();
+
+			TitlesListFragment contentFragment = (TitlesListFragment) fm.findFragmentByTag(FRAG_TAG_LIST);
+			Fragment recFragment = fm.findFragmentByTag(FRAG_TAG_RECOMMEND);
+
+			FragmentTransaction ft = fm.beginTransaction();
+			if(null == contentFragment) {
+				contentFragment = new TitlesListFragment();
+				ft.replace(R.id.frag_bookshelf_contents, contentFragment, FRAG_TAG_LIST);
+			} else {
+				ft.show(contentFragment);
+			}
+			
+			if(null == recFragment) {
+				recFragment = new RecommendFragment();
+				ft.replace(R.id.frag_market_recommendation, recFragment, FRAG_TAG_RECOMMEND);
+			} else {
+				ft.show(recFragment);
+			}
+			
+			if(titleInfoList != null) { 
+				BookshelfTitleItemAdapter adapter = (BookshelfTitleItemAdapter)((TitlesListFragment)contentFragment).getListAdapter();
+				if(adapter == null)
+					adapter = new BookshelfTitleItemAdapter(MainActivity.this, 0, titleInfoList, BookShelfMode.LIST);
+				contentFragment.setListAdapter(adapter);
+				adapter.setRecentlyReadTitle(titleInfo);
+				contentFragment.setOnListItemClickListener(mOnTitleClickListener);
+			}
+			
+			ft.commitAllowingStateLoss();
+		}
+
+		@Override
+		void enter() {
+			
+			final boolean useMultiPanes = EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(MainActivity.this);
+			mBookShelfContainer.findViewById(R.id.bookshelf_contents_main).setVisibility(View.VISIBLE);
+			View detail = null;
+			if(useMultiPanes) {
+				detail = mBookShelfContainer.findViewById(R.id.bookshelf_detail_main);
+			} else {
+				detail = mBookShelfContainer.findViewById(R.id.frag_bookshelf_detail);
+			}
+			if(null != detail) {
+				detail.setVisibility(View.GONE);				
+			}
+			
+			final EbookApplication app = (EbookApplication) getApplication();
+
+			if(mBookShelfMode == BookShelfMode.GRID) {
+				showGrid(app.getTitlesList());
+			} else {
+				showList(app.getTitlesList());
+			}
+		}
+
+		@Override
+		void exit() {
+			//TODO 
+			//mBookShelf.setVisibility(View.GONE);
+		}
+	}
+	
+	class EbookStateContentDetail extends EbookStateObj {
+
+		@Override
+		void enter() {
+			
+			final EbookApplication app = (EbookApplication) getApplication();
+			final TitleInfo selectedTitleInfo = app.getSelectedTitle();
+			
+			if(null == selectedTitleInfo)
+				return;
+			
+			boolean useMultiPanes = EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(MainActivity.this);
+			
+			mBookShelfContainer.findViewById(R.id.bookshelf_contents_main).setVisibility(View.GONE);
+			View detail = null;
+			if(useMultiPanes) {
+				detail = mBookShelfContainer.findViewById(R.id.bookshelf_detail_main);
+			} else {
+				detail = mBookShelfContainer.findViewById(R.id.frag_bookshelf_detail);
+			}
+			if(null != detail) {
+				detail.setVisibility(View.VISIBLE);				
+			}
+			
+			FragmentManager fm = getSupportFragmentManager();
+			
+			ContentsDetailFragment detailFragment = (ContentsDetailFragment)fm.findFragmentByTag(FRAG_TAG_DETAIL);
+			if(null == detailFragment) {
+				detailFragment = new ContentsDetailFragment();
+			}
+			detailFragment.setTitleInfo(selectedTitleInfo);
+			detailFragment.setOnListItemClickListener(mOnContentClickListener);
+			
+			FragmentTransaction ft = fm.beginTransaction();
+			
+			BookshelfContentItemAdapter detailAdapter = (BookshelfContentItemAdapter) detailFragment.getListAdapter();
+			if(detailAdapter == null) {
+				detailAdapter = new BookshelfContentItemAdapter(MainActivity.this);
+				ft.replace(R.id.frag_bookshelf_detail, detailFragment, FRAG_TAG_DETAIL);
+			} else {
+				ft.show(detailFragment);
+			}
+
+			List<ContentInfo> contents = selectedTitleInfo.getAllContents();
+			detailAdapter.setContents(contents);
+			detailFragment.setListAdapter(detailAdapter);
+			
+			if(useMultiPanes) {
+				TitlesListFragment multiListFragment = (TitlesListFragment) fm.findFragmentByTag(FRAG_TAG_LIST_MULTI);
+				if(null == multiListFragment) {
+					multiListFragment = new TitlesListFragment();
+					ft.add(R.id.frag_bookshelf_detail_list, multiListFragment, FRAG_TAG_LIST_MULTI);
+				} else {
+					ft.show(multiListFragment);
+				}
+				BookshelfTitleItemAdapter adapter = (BookshelfTitleItemAdapter) multiListFragment.getListAdapter();
+				if(adapter == null)
+					adapter = new BookshelfTitleItemAdapter(MainActivity.this, 0, app.getTitlesList(), BookShelfMode.LIST_COMPACT);
+				multiListFragment.setListAdapter(adapter);
+				multiListFragment.setOnListItemClickListener(mOnTitleClickListener);
+			}
+			ft.commitAllowingStateLoss();
+		}
+
+		@Override
+		void exit() {
+			mBookShelfContainer.findViewById(R.id.bookshelf_contents_main).setVisibility(View.VISIBLE);
+			
+			View detail = null;
+			if(EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(MainActivity.this)) {
+				detail = mBookShelfContainer.findViewById(R.id.bookshelf_detail_main);
+			} else {
+				detail = mBookShelfContainer.findViewById(R.id.frag_bookshelf_detail);
+			}
+
+			if(null != detail) {
+				detail.setVisibility(View.GONE);				
+			}
+		}
+	}
+	
+	class EbookStateStore extends EbookStateObj {
+
+		@Override
+		void enter() {
+			if(mBookShelfContainer != null && mBookShelfContainer.getVisibility() == View.VISIBLE)
+				mBookShelfContainer.setVisibility(View.GONE);
+			
+			View storeView = findViewById(R.id.frag_store);
+			storeView.setVisibility(View.VISIBLE);
+			
+			FragmentManager fm = getSupportFragmentManager();
+			Fragment fragment = fm.findFragmentByTag(FRAG_TAG_STORE);
+			
+			FragmentTransaction ft = fm.beginTransaction();
+			if(fragment == null) {
+				fragment = new EbookStoreFragment();
+				ft.replace(R.id.frag_store, fragment, FRAG_TAG_STORE);
+			} else {
+				ft.show(fragment);
+			}
+			ft.commitAllowingStateLoss();
+		}
+
+		@Override
+		void exit() {
+			if(mBookShelfContainer != null)
+				mBookShelfContainer.setVisibility(View.VISIBLE);
+			
+			FragmentManager fm = getSupportFragmentManager();
+			Fragment fragment = fm.findFragmentByTag(FRAG_TAG_STORE);
+			
+			FragmentTransaction ft = fm.beginTransaction();
+			ft.hide(fragment);
+			ft.commitAllowingStateLoss();
+		}
+		
+	}
+
+	class EbookStateDeleteList extends EbookStateObj {
+
+		@Override
+		void enter() {
+			FragmentManager fm = getSupportFragmentManager();
+			DeleteListFragment deleteListFragment = (DeleteListFragment)fm.findFragmentByTag(FRAG_TAG_DELETE_LIST);
+			if(null == deleteListFragment) {
+				deleteListFragment = new DeleteListFragment();
+			}
+
+			BookshelfDeleteItemAdapter adapter = deleteListFragment.getListAdapter();
+			if(adapter == null) {
+				adapter = new BookshelfDeleteItemAdapter(MainActivity.this, ((EbookApplication)getApplication()).getTitlesList());
+			}
+			deleteListFragment.setListAdapter(adapter);
+
+			FragmentTransaction ft = fm.beginTransaction();
+			ft.add(R.id.ebook_main_frame, deleteListFragment, FRAG_TAG_DELETE_LIST);
+			ft.commitAllowingStateLoss();
+		}
+
+		@Override
+		void exit() {
+			FragmentManager fm = getSupportFragmentManager();
+			Fragment fragment = fm.findFragmentByTag(FRAG_TAG_DELETE_LIST);
+
+			FragmentTransaction ft = fm.beginTransaction();
+			ft.remove(fragment);
+			ft.commitAllowingStateLoss();
+		}
+		
+	}
+
+	// State objects
+	private EbookStateMain mStateMain = new EbookStateMain();
+	private EbookStateContentDetail mStateContentDetail = new EbookStateContentDetail();
+	private EbookStateStore mStateStore = new EbookStateStore();
+	private EbookStateDeleteList mStateDeleteList = new EbookStateDeleteList();
+	
+	private EbookState mEbookState = EbookState.BOOKSHELF_MAIN;
+	
+	public enum BookShelfMode { GRID, LIST, LIST_COMPACT };
+	private BookShelfMode mBookShelfMode = BookShelfMode.GRID;
+	
+	public void changeState(final EbookState modeToChange) {
+//		mHandler.post(new Runnable() {
+//			
+//			@Override
+//			public void run() {
+				if(mEbookState != modeToChange)
+					mEbookState.getState(MainActivity.this).exit();
+				modeToChange.getState(MainActivity.this).enter();
+				
+				mEbookState = modeToChange;
+//			}
+//		});
+	}
+	
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		setContentView(R.layout.ebook_main);
+		
+		mHandler = new Handler();
+		
+		mAuthView = (WebView) findViewById(R.id.user_login_view);
+		mBookShelfContainer = findViewById(R.id.bookshelf_main_frame);
+		
+		if(null == savedInstanceState) {
+			changeState(EbookState.BOOKSHELF_MAIN);
+
+			SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+			final String sessionID = sp.getString("SessionID", "");
+			final String userID = sp.getString("UserID", "");
+			if(sessionID.equals("") || userID.equals(""))
+				startCertification(); 
+			else 
+				startBookShelfSync();
+		} else {
+			mBookShelfContainer.setVisibility(View.VISIBLE);
+			mAuthView.setVisibility(View.GONE);
+		}
+
+		initActionBar();
+		initSortBar();
+	}
+	
+	@Override
+	public void onBackPressed() {
+		switch (mEbookState) {
+		case CONTENTS_DETAIL:
+			changeState(EbookState.BOOKSHELF_MAIN);
+			return;
+
+		case STORE:
+			FragmentManager fm = getSupportFragmentManager();
+			EbookStoreFragment storeFragment =  (EbookStoreFragment) fm.findFragmentByTag(FRAG_TAG_STORE);
+			
+			if(null != storeFragment) {
+				final WebView storeView = storeFragment.getStoreView();
+				if(storeView != null && storeView.canGoBack()) {
+					mHandler.post(new Runnable() {
+						
+						@Override
+						public void run() {
+							storeView.goBack();
+						}
+					});
+
+					
+					return;
+				}
+			}
+			
+			changeState(EbookState.BOOKSHELF_MAIN);
+			return;
+
+		case DELETE_LIST:
+			changeState(EbookState.BOOKSHELF_MAIN);
+			return;
+
+		default:
+			break;
+		}
+		super.onBackPressed();
+	}
+	
+	//TODO Test code
+	private void initActionBar() {
+		mActionBar = (ActionBar) mBookShelfContainer.findViewById(R.id.switcher_action_bar);
+		if(mActionBar == null)
+			return;
+		
+		mActionBar.addButton(2, "Market", R.drawable.btn_market);
+		mActionBar.addButton(3, "test", R.drawable.action_bar_btn_background);
+		mActionBar.addButton(4, "Update", R.drawable.action_bar_btn_background);
+		mActionBar.addButton(5, "Copy/Move", R.drawable.action_bar_btn_background);
+		mActionBar.addButton(6, "Delete", R.drawable.action_bar_btn_background);
+		mActionBar.addButton(7, "Setting", R.drawable.action_bar_btn_background);
+		mActionBar.addButton(8, "Help", R.drawable.action_bar_btn_background);
+		
+		mActionBar.setonActionBarClickListener(new onActionBarClickListener() {
+			
+			@Override
+			public boolean onActionBarClick(int id) {
+				
+				switch (id) {
+				case 2:
+					changeState(EbookState.STORE);
+					break;
+
+				case 3:
+					if(mBookShelfMode == BookShelfMode.GRID) 
+						mBookShelfMode = BookShelfMode.LIST;
+					else
+						mBookShelfMode = BookShelfMode.GRID;
+
+					changeState(EbookState.BOOKSHELF_MAIN);
+					break;
+
+				case 6:
+					changeState(EbookState.DELETE_LIST);
+					break;
+
+				default:
+					break;
+				}
+				
+				return false;
+			}
+		});
+	}
+	
+	private void initSortBar() {
+		View sortBarContainer = mBookShelfContainer.findViewById(R.id.bookshelf_sort_bar_container);
+		
+		Spinner spinner = (Spinner) sortBarContainer.findViewById(R.id.spinner_sort);
+//		spinner.setAdapter(new ArrayAdapter<String>(MainActivity.this, R.array.bookshlef_sort_types, android.R.layout.simple_spinner_item));
+		spinner.setOnItemSelectedListener(new OnItemSelectedListener() {
+
+			@Override
+			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+				
+				BookshelfTitleItemAdapter adapter;
+				FragmentManager fm = getSupportFragmentManager();
+				if(mBookShelfMode == BookShelfMode.GRID) {
+					TitlesGridFragment fragment = (TitlesGridFragment) fm.findFragmentByTag(FRAG_TAG_GRID);
+					adapter = fragment.getGridAdapter();
+				} else if(mBookShelfMode == BookShelfMode.LIST){
+					TitlesListFragment fragment = (TitlesListFragment) fm.findFragmentByTag(FRAG_TAG_LIST);
+					adapter = (BookshelfTitleItemAdapter) fragment.getListAdapter();
+				} else {
+					TitlesListFragment fragment = (TitlesListFragment) fm.findFragmentByTag(FRAG_TAG_LIST_MULTI);
+					adapter = (BookshelfTitleItemAdapter) fragment.getListAdapter();
+				}
+				
+				if(null != adapter)
+					adapter.changeSortType(position);
+			}
+
+			@Override
+			public void onNothingSelected(AdapterView<?> parent) {
+				
+			}
+		});
+		
+		
+		View btn = sortBarContainer.findViewById(R.id.btn_hide_recommend);
+		btn.setOnClickListener(new OnClickListener() {
+			
+			@Override
+			public void onClick(View v) {
+				// TODO Auto-generated method stub
+				FragmentManager fm = getSupportFragmentManager();
+				Fragment recFragment = fm.findFragmentByTag(FRAG_TAG_RECOMMEND);
+				
+				FragmentTransaction ft = fm.beginTransaction();
+				if(null != recFragment) {
+					
+					if(recFragment.isVisible()) {
+						ft.hide(recFragment);
+						mBookShelfContainer.findViewById(R.id.frag_market_recommendation).setVisibility(View.GONE);
+					} else {
+						ft.show(recFragment);
+						mBookShelfContainer.findViewById(R.id.frag_market_recommendation).setVisibility(View.VISIBLE);
+					}
+					
+				} else {
+					recFragment = new TitlesGridFragment();
+					ft.replace(R.id.frag_market_recommendation, recFragment, FRAG_TAG_RECOMMEND);
+				}
+				if(EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(MainActivity.this)) {
+					TitlesGridFragment gridFragment = (TitlesGridFragment) fm.findFragmentByTag(FRAG_TAG_GRID);
+					if(gridFragment != null) {
+						if(recFragment.isVisible()) {
+							gridFragment.changeGridNumberOfColumn(getResources().getInteger(R.integer.bookshelf_column_no_recommend_count));
+						} else {
+							gridFragment.changeGridNumberOfColumn(getResources().getInteger(R.integer.bookshelf_column_count));	
+						}
+					}
+				}
+				
+				ft.commitAllowingStateLoss();
+			}
+		});
+	}
+	
+	
+	private void startCertification() {
+		
+		String siteUrl = (USE_STAGING_SERVER)?getResources().getString(R.string.site_url_debug):getResources().getString(R.string.site_url);
+		String endUrl = siteUrl.concat("api/user/loginresult");
+
+		mDocomoIdFlg = false;
+		Intent _intent = getIntent();
+		if(_intent != null) {
+			mDocomoIdFlg = _intent.getBooleanExtra("docomoIdFlg", false);
+		}
+
+		CertificationClient certificationClient = null;
+		if(mDocomoIdFlg) {
+			ProgressDialog dialog = new ProgressDialog(this);
+			dialog.setTitle("");
+			dialog.setMessage(getString(R.string.in_contact));
+			dialog.setProgressStyle(ProgressDialog.STYLE_SPINNER);
+			dialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+						@Override
+						public void onCancel(DialogInterface dialog) {
+							mAuthView.stopLoading();
+							MainActivity.this.finish();
+							dialog.dismiss();
+						}
+					});
+			mDialog = dialog;
+			certificationClient = new CertificationClient(this, siteUrl, endUrl, mDialog);
+		} else {
+			certificationClient = new CertificationClient(this, siteUrl, endUrl,
+					!Util.getConnectedNetworkState(getApplicationContext()));
+		}
+		CertificationChromeClient certificationChromeClient = new CertificationChromeClient(this, endUrl);
+		mAuthView.setWebViewClient(certificationClient);
+		mAuthView.setWebChromeClient(certificationChromeClient);
+		mAuthView.getSettings().setJavaScriptEnabled(true);
+
+		String loadUrl = ServerInterface.getApiUrl(getApplicationContext(), ServerInterface.API_USER_LOGIN);
+		if(mDocomoIdFlg) {
+			loadUrl = loadUrl.concat("?docomoID=1");
+		}
+
+		mAuthView.loadUrl(loadUrl);
+
+		mAuthView.setOnKeyListener(new View.OnKeyListener() {
+			@Override
+			public boolean onKey(View v, int keyCode, KeyEvent event) {
+
+				if(keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+					if(mAuthView.canGoBack()) {
+						mAuthView.goBack();
+						return true;
+					} else {
+						setResult(RESULT_CANCELED);
+						MainActivity.this.finish();
+						return true;
+					}
+				}
+				return false;
+			}
+		});
+	}
+		
+	private OnItemClickListener mOnTitleClickListener = new OnItemClickListener() {
+
+		@Override
+		public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+			Object tag = view.getTag();
+			if(tag instanceof TitleInfo) {
+				EbookApplication app = (EbookApplication) getApplication();
+				app.setSelectedTitle((TitleInfo) tag);
+				changeState(EbookState.CONTENTS_DETAIL);
+			}
+		}
+	};
+	
+	private OnItemClickListener mOnContentClickListener = new OnItemClickListener() {
+
+		@Override
+		public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+
+			if(TEST_DOWNLOAD_CONTENT) {
+				Object tag = view.getTag();
+				if(tag instanceof ContentInfo) {
+					ContentInfo cInfo = (ContentInfo) tag;
+
+					if(cInfo.isDownloaded()) {
+						Util.startViewer(MainActivity.this, cInfo);
+						Intent intent = new Intent(MainActivity.this, TestViewerActivity.class);
+						startActivity(intent);
+						setRecentlyReadContentId(cInfo);
+					} else {
+						if(mDownloadTask == null) {
+							mDownloadTask = new DownloadTask(MainActivity.this);
+							mDownloadTask.setDownloadProgressCallBack(MainActivity.this);
+
+							mDownloadTask.execute(cInfo);
+						} else {
+							mDownloadTask.addDownloadContents(cInfo);
+						}
+					}
+				}
+			} else {
+				//TODO
+				Util.startViewer(MainActivity.this, null);
+			}
+		}
+	};
+	
+	@Override
+	public void onSuccessUserMyId(String response) {
+		Log.d(TAG, " onSuccessUserMyId");
+		Map<String, String> responseMap = Util.responseSplit(response);
+		
+		String siteUrl = (USE_STAGING_SERVER)?getResources().getString(R.string.site_url_debug):getResources().getString(R.string.site_url);
+		
+		CookieManager cookieManager = CookieManager.getInstance();
+		cookieManager.setCookie(siteUrl, responseMap.get("SessionID"));
+
+		SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+		Editor ed = sp.edit();
+		SimpleDateFormat simpleDate = new SimpleDateFormat("yyyyMMddHHmmss");
+		ed.putString("UserID", responseMap.get("UserNo"));
+		ed.putString("SessionID", cookieManager.getCookie(siteUrl));
+		ed.putString("SyncTime", simpleDate.format(new Date()));
+		
+		ed.commit();
+		startBookShelfSync();
+	}
+	
+	private void startBookShelfSync() {
+		mBookShelfContainer.setVisibility(View.VISIBLE);
+		mAuthView.setVisibility(View.GONE);
+		
+		SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+		BookShelfSync bss = new BookShelfSync(MainActivity.this
+				,MainActivity.this
+				,FakeInfo.getFakeUserAgentString());
+		Map<String, String> params = new HashMap<String, String>();
+
+		if (sp.contains(BookShelfSync.BOOK_SHELF_SYNC_DATE)) {
+			params.put(BookShelfSync.BOOK_SHELF_SYNC_DATE, sp.getString(BookShelfSync.BOOK_SHELF_SYNC_DATE, null));
+		}
+		bss.execute(params);
+	}
+	
+	@Override
+	public void onFailedUserMyId(int resId) {
+		Log.d(TAG, " onFailedUserMyId");
+	}
+
+	@Override
+	public void onSuccessBookShelfSync(String response, List<TitleInfo> titleInfoList) {
+		Log.d(TAG, "sync succeed");
+		final EbookApplication app = (EbookApplication) getApplication();
+		app.setTitlesList(titleInfoList);
+		getImageThumbnail(titleInfoList);
+		
+		changeState(EbookState.BOOKSHELF_MAIN);
+	}
+
+	@Override
+	public void onFailedAsyncTask(int resId) {
+		Log.d(TAG, "sync failed");
+	}
+	
+	private void getImageThumbnail(List<TitleInfo> titleInfos) {
+
+		JSONArray jsroot = new JSONArray();
+		try {
+			final int count = titleInfos.size();
+			for (int i = 0; i < count; i++) {
+				final TitleInfo info = titleInfos.get(i);
+				// ?�ァ?�ル?�存?�す?�場?�は?�ラ?�ー?�に?�え?�い
+				if (!Util.isExistsTitleImage(this, info.mTitleId, null)) {
+					JSONObject jsobj = new JSONObject();
+					jsobj.put("title_id", Util.getTitleId(info.mTitleId));
+					jsobj.put("item_id", "");
+					jsroot.put(jsobj);
+				}
+				
+				List<ContentInfo> contents = info.getAllContents();
+				for(ContentInfo contentInfo : contents) {
+					if (!Util.isExistsTitleImage(this, info.mTitleId, contentInfo.mContentId)) {
+						JSONObject jsobj = new JSONObject();
+						jsobj.put("title_id", Util.getTitleId(info.mTitleId));
+						jsobj.put("item_id", contentInfo.mContentId);;
+						jsroot.put(jsobj);
+					}
+				}
+				info.setTitleThumbnailImage(Util.getTitleImage(MainActivity.this, info.mTitleId, null));
+			}
+		} catch (JSONException e) {
+			e.getStackTrace();
+		}
+
+		Map<String, String> params = new HashMap<String, String>();
+		params.put(BookThumbnailDownloadSync.BOOK_THUMBNAIL_DOWNLOADER_DATA, jsroot.toString());
+
+		BookThumbnailDownloadSync btds = new BookThumbnailDownloadSync(
+				MainActivity.this, 
+				MainActivity.this, 
+				mAuthView.getSettings().getUserAgentString());
+		btds.execute(params);
+	}
+	
+	@Override
+	public void onBookIndivisualThumbnailDownloaded(long titleId, String contentId) {
+		final FragmentManager fm = getSupportFragmentManager();
+		final BaseAdapter adapter;
+		if(mEbookState == EbookState.BOOKSHELF_MAIN) {
+			if(mBookShelfMode == BookShelfMode.GRID) {
+				TitlesGridFragment fragment = (TitlesGridFragment) fm.findFragmentByTag(FRAG_TAG_GRID);
+				adapter = fragment.getGridAdapter();
+			} else {
+				TitlesListFragment fragment = (TitlesListFragment) fm.findFragmentByTag(FRAG_TAG_LIST);
+				adapter = (BookshelfTitleItemAdapter) fragment.getListAdapter();
+			}
+		} else if(mEbookState == EbookState.CONTENTS_DETAIL) {
+			ContentsDetailFragment fragment = (ContentsDetailFragment) fm.findFragmentByTag(FRAG_TAG_DETAIL);
+			adapter = (BaseAdapter) fragment.getListAdapter(); 
+		} else {
+			adapter = null;
+		}
+		
+		if(adapter != null) {
+			mHandler.post(new Runnable() {
+				
+				@Override
+				public void run() {
+					adapter.notifyDataSetChanged();
+				}
+			});
+		}
+	}
+
+	@Override
+	public void onSuccessBookThumbnailDownloadSync(String response) {
+		Log.d(TAG, "onSuccessBookThumbnailDownloadSync res = " + response);
+	}
+
+	@Override
+	public void onFailedBookThumbnailDownloadSync(int resId) {
+		Log.d(TAG, "onFailedBookThumbnailDownloadSync resId = " + resId);
+		
+	}
+
+	@Override
+	public void onStartDownloadProgress(ContentInfo... contentInfos) {
+		updateBookShelfDetailListView();
+	}
+
+	@Override
+	public void onProgressDownload(ContentInfo... contentInfos) {
+		updateBookShelfDetailListView();
+	}
+
+	@Override
+	public void onDownloadFinished(ContentInfo... contentInfos) {
+		for(ContentInfo contentInfo : contentInfos) {
+			contentInfo.clearDownloadTaskInfo(true);
+		}
+		updateBookShelfDetailListView();
+	}
+
+	@Override
+	public void onDownloadCancelled(ContentInfo... contentInfos) {
+		for(ContentInfo contentInfo : contentInfos) {
+			contentInfo.clearDownloadTaskInfo(false);
+		}
+		updateBookShelfDetailListView();
+	}
+
+	@Override
+	public void onDownloadTaskAllFinished() {
+		mDownloadTask = null;
+	}
+	
+	private void updateBookShelfDetailListView() {
+		if(mEbookState == EbookState.CONTENTS_DETAIL) {
+			mHandler.post(new Runnable() { 
+				@Override
+				public void run() {
+					FragmentManager fm = getSupportFragmentManager();
+					ContentsDetailFragment detailFragment = (ContentsDetailFragment) fm.findFragmentByTag(FRAG_TAG_DETAIL);
+					((BaseAdapter)detailFragment.getListAdapter()).notifyDataSetChanged();
+				}
+			});
+		}
+	}
+	
+	private void setRecentlyReadContentId(ContentInfo contentInfo) {
+		if(contentInfo == null)
+			return;
+		
+		SharedPreferences spf = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
+		
+		Editor editor = spf.edit();
+		editor.putString(KEY_RECENTLY_READ_CONTENT, contentInfo.mContentId);
+		editor.commit();
+	}
+	
+	private String getRecentlyReadContentId() {
+		SharedPreferences spf = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
+		return spf.getString(KEY_RECENTLY_READ_CONTENT, null);
+	}
+
+	@Override
+	protected void onSaveInstanceState(Bundle outState) {
+		super.onSaveInstanceState(outState);
+
+		outState.putSerializable(KEY_STATE_EBOOK_MODE, mEbookState);
+		outState.putSerializable(KEY_STATE_BOOKSHELF_MODE, mBookShelfMode);
+	}
+
+	@Override
+	protected void onRestoreInstanceState(Bundle savedInstanceState) {
+		super.onRestoreInstanceState(savedInstanceState);
+		
+		EbookState ebookState = (EbookState) savedInstanceState.getSerializable(KEY_STATE_EBOOK_MODE);
+		mBookShelfMode = (BookShelfMode) savedInstanceState.getSerializable(KEY_STATE_BOOKSHELF_MODE);
+
+		changeState(ebookState);
+	}
+}

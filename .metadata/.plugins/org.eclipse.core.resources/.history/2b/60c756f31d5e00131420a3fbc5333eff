@@ -1,0 +1,381 @@
+package jp.co.nttdocomo.ebook.fragments;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.DialogInterface.OnCancelListener;
+import android.content.Intent;
+import android.os.Bundle;
+import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentManager;
+import android.view.KeyEvent;
+import android.view.LayoutInflater;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.WebView;
+
+import jp.co.nttdocomo.ebook.Constants;
+import jp.co.nttdocomo.ebook.Debug;
+import jp.co.nttdocomo.ebook.EbookApplication;
+import jp.co.nttdocomo.ebook.EbookLauncher;
+import jp.co.nttdocomo.ebook.EbookModel;
+import jp.co.nttdocomo.ebook.ExtraKeys;
+import jp.co.nttdocomo.ebook.R;
+import jp.co.nttdocomo.ebook.Util;
+import jp.co.nttdocomo.ebook.auth.CertificationChromeClient;
+import jp.co.nttdocomo.ebook.auth.CertificationChromeClient.OnProxyMaintenanceListener;
+import jp.co.nttdocomo.ebook.auth.CertificationClient;
+import jp.co.nttdocomo.ebook.auth.CertificationClient.OnStartLoginListener;
+import jp.co.nttdocomo.ebook.fragments.common.CustomDialog;
+import jp.co.nttdocomo.ebook.fragments.common.ProgressDialog;
+import jp.co.nttdocomo.ebook.server.ServerInterface;
+
+public class CertificationFragment extends Fragment implements OnStartLoginListener, OnCancelListener,
+							ProgressDialog.ProgressListener, OnProxyMaintenanceListener {
+	private static final String TAG = "CertificationFragment";
+
+	private static final int FINISH_DELAY = 100;
+	private static final String EXTRA_IS_WAIT_DIALOG_SHOW = "is_wait_dialog_show";
+
+//	private WebView mAuthView;
+	private boolean mDocomoIdFlg = false;
+	private boolean mIsWaitDialogShow = false;
+	private int mIsWaitLoginError = 0;
+	
+	private boolean mIsResumed = false;
+
+	@Override
+	public void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+
+		if(savedInstanceState != null)
+			return;
+		
+		Bundle args = getArguments();
+		if(args != null) {
+			mDocomoIdFlg = args.getBoolean(ExtraKeys.DOCOMO_ID_FLG);
+		}
+	}
+
+	@Override
+	public View onCreateView(LayoutInflater inflater, ViewGroup container,
+			Bundle savedInstanceState) {
+		WebView webView = (WebView) inflater.inflate(R.layout.simple_webview, null);
+		
+		if(savedInstanceState != null) {
+			mIsResumed = savedInstanceState.getBoolean("is_resumed");
+			mIsWaitDialogShow = savedInstanceState.getBoolean(EXTRA_IS_WAIT_DIALOG_SHOW);
+//			final EbookModel model = ((EbookApplication)getActivity().getApplicationContext()).getModel();
+			//WebView webView = model.getWebView();
+//			if(webView != null) {
+				
+				final EbookLauncher launcher = (EbookLauncher)getActivity();
+				String siteUrl = (Debug.USE_STAGING_SERVER) ? 
+						getResources().getString(R.string.site_url_debug) : 
+						getResources().getString(R.string.site_url);
+				String endUrl = siteUrl.concat("api/user/loginresult");
+
+				CertificationClient certificationClient = null;
+				boolean isMobileNetworkAvailable = false;
+				
+				if(mDocomoIdFlg) {
+					certificationClient = new CertificationClient(launcher, siteUrl, endUrl);
+				} else {
+					isMobileNetworkAvailable = Util.isMobileNetworkAvailable(launcher.getApplicationContext());
+					android.util.Log.d(TAG, "[DEBUG] isMobileNetworkAvailable : " + isMobileNetworkAvailable);
+					certificationClient = new CertificationClient(launcher, siteUrl, endUrl, !isMobileNetworkAvailable);
+				}
+				if(certificationClient != null)
+					certificationClient.setOnStartLoginListener(this);
+				
+				String loadUrl = ServerInterface.getApiUrl(launcher.getApplicationContext(), ServerInterface.API_USER_LOGIN);
+				CertificationChromeClient certificationChromeClient = new CertificationChromeClient(launcher, loadUrl, endUrl, mDocomoIdFlg);
+				if(certificationChromeClient != null)
+					certificationChromeClient.setOnProxyMaintenanceListener(this);
+				webView.setWebChromeClient(certificationChromeClient);
+				webView.setWebViewClient(certificationClient);
+			//}
+			//return model.getWebView();
+		}
+		
+		
+
+		webView.getSettings().setUseWideViewPort(true);
+		webView.getSettings().setLoadWithOverviewMode(true);
+
+		return webView; //inflater.inflate(R.layout.auth, null);
+	}
+	
+	@SuppressLint("SetJavaScriptEnabled")
+    @Override
+	public void onViewCreated(View view, Bundle savedInstanceState) {
+		super.onViewCreated(view, savedInstanceState);
+		if(savedInstanceState != null) {
+			if(mIsWaitDialogShow) {
+				showWaitDialog();
+			} else {
+				dismissWaitDialog();
+			}
+//			return;
+		}
+		
+		final WebView webView = (WebView)view.findViewById(R.id.webview);
+		webView.clearHistory();
+		final EbookLauncher launcher = (EbookLauncher)getActivity();
+		
+		String siteUrl = (Debug.USE_STAGING_SERVER) ? 
+				getResources().getString(R.string.site_url_debug) : 
+				getResources().getString(R.string.site_url);
+		String endUrl = siteUrl.concat("api/user/loginresult");
+
+		CertificationClient certificationClient = null;
+		boolean isMobileNetworkAvailable = false;
+		
+		android.util.Log.d(TAG, "[DEBUG] mDocomoIdFlg : " + mDocomoIdFlg);
+
+		String loadUrl = ServerInterface.getApiUrl(launcher.getApplicationContext(), ServerInterface.API_USER_LOGIN);
+		if(mDocomoIdFlg) {
+			certificationClient = new CertificationClient(launcher, siteUrl, endUrl);
+		} else {
+			Context context = launcher.getApplicationContext();
+			isMobileNetworkAvailable = Util.isMobileNetworkAvailable(context) && !Util.isOnTethering(context);
+			android.util.Log.d(TAG, "[DEBUG] isMobileNetworkAvailable : " + isMobileNetworkAvailable);
+			certificationClient = new CertificationClient(launcher, siteUrl, endUrl, !isMobileNetworkAvailable);
+		}
+		if(certificationClient != null)
+			certificationClient.setOnStartLoginListener(this);
+		CertificationChromeClient certificationChromeClient = new CertificationChromeClient(launcher, loadUrl, endUrl, mDocomoIdFlg);
+		if(certificationChromeClient != null)
+			certificationChromeClient.setOnProxyMaintenanceListener(this);
+		webView.setWebViewClient(certificationClient);
+		webView.setWebChromeClient(certificationChromeClient);
+		webView.getSettings().setJavaScriptEnabled(true);
+
+		if(mDocomoIdFlg) {
+			loadUrl = loadUrl.concat("?docomoID=1");
+		}
+
+		webView.loadUrl(loadUrl);
+		webView.requestFocus(View.FOCUS_DOWN);
+		webView.setOnTouchListener(new View.OnTouchListener() {
+	        @Override
+	        public boolean onTouch(View v, MotionEvent event) {
+	            switch (event.getAction()) {
+	                case MotionEvent.ACTION_DOWN:
+	                    if (!v.hasFocus()) {
+	                        v.requestFocus();
+	                    }
+	                    break;
+	            }
+	            return false;
+	        }
+	    });
+
+		webView.setOnKeyListener(new View.OnKeyListener() {
+			@Override
+			public boolean onKey(View v, int keyCode, KeyEvent event) {
+
+				if(keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+					if(webView.canGoBack()) {
+						webView.goBack();
+						return true;
+					}
+				}
+				return false;
+			}
+		});
+
+		if(!isMobileNetworkAvailable)
+			mIsWaitDialogShow = true;
+	}
+	
+	
+
+	@Override
+	public void startLogin() {
+		if(mIsResumed)
+			showWaitDialog();
+		else
+			pendingWaitDialogShow();
+	}
+
+	@Override
+	public void endLogin() {
+		mIsWaitDialogShow = false;
+		if(mIsResumed) {
+			dismissWaitDialog();
+		} else {
+			pendingWaitDialogHide();
+		}
+	}
+
+	@Override
+	public void loginError(int errorCode) {
+		if(mIsResumed) {
+			dismissWaitDialog();
+			mIsWaitDialogShow = false;
+
+			if(errorCode > 0) {
+				final FragmentManager fm = getChildFragmentManager();
+                if(fm == null) return;
+				CustomDialog error = Util.createErrorDialog(getActivity(), errorCode, Constants.FRAG_TAG_CERTIFICATION, -1, false);
+				error.setOnCancelListener(this, Constants.FRAG_TAG_CERTIFICATION);
+				error.show(fm, Constants.FRAG_TAG_ERROR);
+			}
+		} else {
+			pendingWaitDialogHide();
+			if(errorCode > 0) {
+				pendingWaitLoginError(errorCode);
+			}
+		}
+	}
+	
+	private void pendingWaitDialogShow() {
+		mIsWaitDialogShow = true;
+	}
+
+	private void pendingWaitDialogHide() {
+		mIsWaitDialogShow = false;
+	}
+
+	private void pendingWaitLoginError(int error) {
+		mIsWaitLoginError = error;
+	}
+
+	@Override
+	public void onResume() {
+		mIsResumed = true;
+		super.onResume();
+		if(mIsWaitDialogShow)
+			showWaitDialog();
+		else
+			dismissWaitDialog();
+
+		if(mIsWaitLoginError > 0) {
+			final FragmentManager fm = getChildFragmentManager();
+            if(fm == null) return;
+			CustomDialog error = Util.createErrorDialog(getActivity(), mIsWaitLoginError, Constants.FRAG_TAG_CERTIFICATION, -1, false);
+			error.show(fm, Constants.FRAG_TAG_ERROR);
+			mIsWaitLoginError = 0;
+		}
+	}
+	
+	
+
+	/* (non-Javadoc)
+	 * @see android.support.v4.app.Fragment#onPause()
+	 */
+	@Override
+	public void onPause() {
+		mIsResumed = false;
+		super.onPause();
+	}
+
+	private void showWaitDialog() {
+
+		FragmentManager fm = getChildFragmentManager();
+		//FragmentManager fm = getActivity().getSupportFragmentManager();
+		ProgressDialog dialog = (ProgressDialog)fm.findFragmentByTag(Constants.FRAG_TAG_PROGRESS);
+		if(dialog != null)
+			return;
+
+		dialog = new ProgressDialog();
+		Bundle args = new Bundle();
+		args.putInt(ExtraKeys.CUSTOM_DIALOG_MESSAGE, R.string.in_contact);
+		dialog.setArguments(args);
+//		dialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+//			@Override
+//			public void onCancel(DialogInterface dialog) {
+//				//mAuthView.stopLoading();
+//				//launcher.finish();
+//				dialog.dismiss();
+//			}
+//		});
+		dialog.setProgressListener(this, Constants.FRAG_TAG_CERTIFICATION);
+		dialog.show(fm, Constants.FRAG_TAG_PROGRESS);
+	}
+
+	private void dismissWaitDialog() {
+		FragmentManager fm = getChildFragmentManager();
+        if(fm == null) return;
+		ProgressDialog dialog = (ProgressDialog)fm.findFragmentByTag(Constants.FRAG_TAG_PROGRESS);
+		if(dialog != null) {
+			dialog.dismiss();
+		}
+	}
+
+	@Override
+	public void onActivityResult(int requestCode, int resultCode, Intent data) {
+		switch(requestCode) {
+			case Constants.REQUEST_FINISH_WHEN_ERROR:
+				if(resultCode == Activity.RESULT_OK) {
+					final Activity activity = getActivity();
+					if(activity != null) {
+						getView().getHandler().postDelayed(new Runnable() {
+							@Override
+							public void run() {
+								getActivity().onBackPressed();
+							}
+						}, FINISH_DELAY);
+					} else {
+						android.util.Log.d(TAG, "[DEBUG] onActivityResult() REQUEST_FINISH_WHEN_ERROR activity is NULL.");
+					}
+				}
+				break;
+		}
+		super.onActivityResult(requestCode, resultCode, data);
+	}
+
+	@Override
+	public void onCancel(DialogInterface dialog) {
+	    if(getActivity() != null)
+	        getActivity().onBackPressed();
+	}
+
+    @Override
+    public void onProgressCancel(DialogInterface dialog) {
+    	final WebView webView = (WebView)getView().findViewById(R.id.webview);
+        if(webView != null) {
+        	webView.stopLoading();
+        	webView.getSettings().setJavaScriptEnabled(false);
+        }
+        if(getActivity() != null)
+            getActivity().onBackPressed();
+    }
+
+    @Override
+    public void onProgressDismiss(DialogInterface dialog) {
+        
+    }
+
+	@Override
+	public void onProxyMaintenance() {
+		//loginError(Constants.ERROR_CODE_PROXY_ERROR);
+	    Context context = getActivity();
+        if(context != null && context instanceof EbookLauncher) {
+            EbookLauncher launcher = (EbookLauncher)context;
+            launcher.onProcProxyMaintenance();
+        }
+	}
+
+	/* (non-Javadoc)
+	 * @see android.support.v4.app.Fragment#onSaveInstanceState(android.os.Bundle)
+	 */
+	@Override
+	public void onSaveInstanceState(Bundle outState) {
+		dismissWaitDialog();
+		super.onSaveInstanceState(outState);
+		
+		outState.putBoolean("is_resumed", mIsResumed);
+		
+		outState.putBoolean(EXTRA_IS_WAIT_DIALOG_SHOW, mIsWaitDialogShow);
+		
+		final WebView webView = (WebView)getView().findViewById(R.id.webview);
+		webView.saveState(outState);
+//		final EbookModel model = ((EbookApplication)getActivity().getApplicationContext()).getModel();
+//		model.setWebView(webView);
+//		((ViewGroup)getView()).removeView(webView);
+	}
+}

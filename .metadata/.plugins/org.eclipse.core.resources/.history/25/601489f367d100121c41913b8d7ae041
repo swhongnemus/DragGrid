@@ -1,0 +1,129 @@
+package jp.co.nttdocomo.ebook;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
+import android.widget.ImageView;
+import android.widget.TextView;
+
+import jp.co.nttdocomo.ebook.MainActivity.BookShelfMode;
+
+import java.text.Collator;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+public class BookshelfTitleItemAdapter extends ArrayAdapter<TitleInfo> {
+	
+	private static final String TAG = "BookshelfTitleItemAdapter";
+	
+	static final int SORT_TYPE_DATE_BOUGHT = 0;
+	static final int SORT_TYPE_TITLE = 1;
+	static final int SORT_TYPE_AUTHOR = 2;
+	
+	private int mSortType = SORT_TYPE_DATE_BOUGHT;
+	
+	private BookShelfMode mMode;
+	private TitleInfosComparator mSorter;
+
+	public BookshelfTitleItemAdapter(Context context, int resId, List<TitleInfo> titles, BookShelfMode mode) {
+		super(context, resId, titles);
+		mMode = mode;
+		mSorter = new TitleInfosComparator();
+		sort(mSorter);
+	}
+	
+	public void changeSortType(int sortType) {
+		mSortType = sortType;
+		sort(mSorter);
+	}
+
+	@Override
+	public long getItemId(int position) {
+		return getItem(position).mTitleId;
+	}
+
+	@Override
+	public View getView(int position, View convertView, ViewGroup parent) {
+
+		if(convertView == null) {
+			final LayoutInflater inflater = LayoutInflater.from(getContext());
+			if(mMode == BookShelfMode.GRID)
+				convertView = inflater.inflate(R.layout.bookshelf_grid_item, null);
+			else if(mMode == BookShelfMode.LIST) {
+				convertView = inflater.inflate(R.layout.bookshelf_list_title_item, null);
+			} else {
+				convertView = inflater.inflate(R.layout.bookshelf_list_multi_content_item, null);
+			}
+		}
+
+		final TitleInfo titleInfo = (TitleInfo) getItem(position);
+		convertView.setTag(titleInfo);
+		
+		final Bitmap titleImage = Util.getTitleImage(getContext(), titleInfo.mTitleId, null); // titleInfo.getTitleThumbnailImage(); //
+		
+		switch (mMode) {
+		case GRID:
+			//TODO
+			((ImageView) convertView.findViewById(R.id.book_cover)).setImageBitmap(titleImage);
+			break;
+		case LIST:
+			((ImageView) convertView.findViewById(R.id.book_cover)).setImageBitmap(titleImage);
+			((TextView) convertView.findViewById(R.id.text_title)).setText(titleInfo.mTitleKana);
+			((TextView) convertView.findViewById(R.id.text_author)).setText(titleInfo.mAuthorNameKana);
+			((TextView) convertView.findViewById(R.id.text_exp_date)).setText(titleInfo.mDate.toString());
+			break;
+			
+		case LIST_COMPACT:
+			((ImageView) convertView.findViewById(R.id.book_cover)).setImageBitmap(titleImage);
+			((TextView) convertView.findViewById(R.id.text_title)).setText(titleInfo.mTitleKana);
+			((TextView) convertView.findViewById(R.id.text_author)).setText(titleInfo.mAuthorNameKana);
+		default:
+			break;
+		}
+
+		return convertView;
+	}
+	
+	public class TitleInfosComparator implements Comparator<TitleInfo> {
+		
+		TitleInfo mRecentlyReadTitle;
+		
+		public void setRecentlyReadTitle(TitleInfo titleInfo) {
+			mRecentlyReadTitle = titleInfo;
+		}
+
+		@Override
+		public int compare(TitleInfo lhs, TitleInfo rhs) {
+			if(null != mRecentlyReadTitle) {
+				if(lhs == mRecentlyReadTitle)
+					return -1;
+
+				if(rhs == mRecentlyReadTitle)
+					return 1;
+			}
+			
+			int result = 0;
+			Collator collator = Collator.getInstance();
+			switch (mSortType) {
+			case SORT_TYPE_TITLE:
+				result = collator.compare(lhs.mTitleKana, rhs.mTitleKana);
+				break;
+				
+			case SORT_TYPE_AUTHOR:
+				result = collator.compare(lhs.mAuthorNameKana, rhs.mAuthorNameKana);
+				break;
+			case SORT_TYPE_DATE_BOUGHT:	
+			default:
+				result = lhs.mDate.compareTo(rhs.mDate);
+				break;
+			}
+			
+			return result;
+		}
+
+	}
+}

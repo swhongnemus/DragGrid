@@ -1,0 +1,121 @@
+package com.nemustech.test.eatupfreespace;
+
+import android.app.Activity;
+import android.content.Context;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.StatFs;
+import android.util.Log;
+import android.view.Menu;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+
+public class MainActivity extends Activity {
+	
+	
+	private String mPath;
+
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		setContentView(R.layout.activity_main);
+		
+		mPath = getFilesDir().getPath() + File.separator + "tmp.out";
+		
+		final TextView currFreeSpaceTxt = (TextView) findViewById(R.id.value_curr_free_space);
+		currFreeSpaceTxt.setText(String.valueOf(getAvailableSpace(this)));
+		
+		final TextView currTmpFileSilzeTxt = (TextView) findViewById(R.id.value_curr_free_space);
+		File tmpFile = new File(mPath);
+		if(tmpFile != null && tmpFile.exists()) {
+			currTmpFileSilzeTxt.setText(String.valueOf(tmpFile.length()));
+		} else {
+			currTmpFileSilzeTxt.setText(String.valueOf(0));
+		}
+		
+		
+		final Button btn = (Button)findViewById(R.id.btn_eat_up);
+		btn.setOnClickListener(new OnClickListener() {
+			
+			@Override
+			public void onClick(View v) {
+				EditText valueEditTxt = (EditText) findViewById(R.id.edit_value);
+				String valueStr = valueEditTxt.getText().toString();
+				
+				final long sizeToLeave = Long.valueOf(valueStr);
+				final long availSize = MainActivity.getAvailableSpace(MainActivity.this);
+				final long tmpFileSize;
+				final File tmpFile = new File(mPath);
+				if(tmpFile.exists()) {
+					tmpFileSize = tmpFile.length();
+				} else {
+					tmpFileSize = 0;
+				}
+				
+				if((availSize - tmpFileSize) > sizeToLeave) {
+					removeTmpFile();
+					createEmptyFile(sizeToLeave);
+				}
+			}
+		});
+	}
+
+	@Override
+	public boolean onCreateOptionsMenu(Menu menu) {
+		// Inflate the menu; this adds items to the action bar if it is present.
+		getMenuInflater().inflate(R.menu.main, menu);
+		return true;
+	}
+	
+	private void createEmptyFile(long fileSize) {
+		
+		RandomAccessFile f = null;
+		try {
+			f = new RandomAccessFile(mPath, "rw");
+			f.setLength(fileSize);
+			Toast.makeText(this, "File creation fin", Toast.LENGTH_SHORT).show();;
+		} catch (Exception e) {
+			Log.w("Create File", "Failed to write into file");
+		} finally {
+			if(f != null) {
+				try {
+					f.close();
+				} catch (IOException e) {
+					Log.w("Create File", "Failed to close file");
+					e.printStackTrace();
+				}
+			}
+       }
+	}
+	
+	public boolean removeTmpFile() {
+		if(mPath != null) {
+			File tmpFile = new File(mPath);
+			if(tmpFile != null && tmpFile.exists()) {
+				tmpFile.delete();
+			}
+		}
+		return true;
+	}
+	
+	static long getAvailableSpace(Context context) {
+		final String path = context.getFilesDir().getPath();
+		final StatFs stat = new StatFs(path);
+		final long blockSize = stat.getBlockSize();
+		final long availableBlocks = stat.getAvailableBlocks();
+		return availableBlocks * blockSize;
+//		StatFs stats = new StatFs("/data");
+//		long availableBlocks = stats.getAvailableBlocks();
+//		long blockSizeInBytes = stats.getBlockSize();
+//		android.util.Log.d("hsw_dbg", " space = " + (availableBlocks * blockSizeInBytes));
+//		return availableBlocks * blockSizeInBytes;
+	}
+}

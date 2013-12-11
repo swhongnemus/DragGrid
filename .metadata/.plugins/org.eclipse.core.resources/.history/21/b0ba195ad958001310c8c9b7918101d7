@@ -1,0 +1,639 @@
+package jp.co.nttdocomo.ebook;
+
+import android.content.ContentProvider;
+import android.content.ContentUris;
+import android.content.ContentValues;
+import android.content.Context;
+import android.database.Cursor;
+import android.database.SQLException;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteOpenHelper;
+import android.database.sqlite.SQLiteQueryBuilder;
+import android.net.Uri;
+import android.text.TextUtils;
+import android.util.Log;
+
+import jp.co.nttdocomo.ebook.EbookSettings.Bookmark;
+import jp.co.nttdocomo.ebook.EbookSettings.Contents;
+import jp.co.nttdocomo.ebook.EbookSettings.DownloadQueue;
+import jp.co.nttdocomo.ebook.EbookSettings.Sample;
+import jp.co.nttdocomo.ebook.EbookSettings.Title;
+import jp.co.nttdocomo.ebook.old.bookmarkdb.MigContentInfo;
+import jp.co.nttdocomo.ebook.old.bookmarkdb.OldBookmarkMigration;
+import jp.co.sharp.android.xmdf.app.FontInfoDef;
+import jp.co.sharp.android.xmdf.app.db.DaoFactory;
+import jp.co.sharp.android.xmdf.app.db.T_BookConfig;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class EbookProvider extends ContentProvider {
+	
+	static final String AUTHORITY = "jp.co.nttdocomo.ebook";
+	
+	// Tables
+	static final String TABLE_TITLE = "title";
+	static final String TABLE_CONTENT = "contents";
+	static final String TABLE_BOOKMARK = "bookmark";
+	static final String TABLE_DOWNLOAD_QUEUE = "download_queue";
+	static final String TABLE_SAMPLE = "sample";
+	
+//	static boolean mMigration = false;
+	
+	private DatabaseHelper mDatabaseHelper;
+	public static boolean dbInitailized = true;
+	public static boolean mMigration = false;
+	
+	@Override
+	public boolean onCreate() {
+		mDatabaseHelper = new DatabaseHelper(getContext());
+        return true;
+	}
+	
+	@Override
+	public String getType(Uri uri) {
+		return null; // Not exported
+	}
+
+	@Override
+	public int delete(Uri uri, String where, String[] selectionArgs) {
+		SqlArguments args = new SqlArguments(uri, where, selectionArgs);
+
+        SQLiteDatabase db = mDatabaseHelper.getWritableDatabase();
+        int count = db.delete(args.table, args.where, args.args);
+        if (count > 0) 
+        	sendNotify(uri);
+
+        return count;
+	}
+
+	@Override
+	public Uri insert(Uri uri, ContentValues values) {
+		SqlArguments args = new SqlArguments(uri);
+
+        SQLiteDatabase db = mDatabaseHelper.getWritableDatabase();
+        final long rowId = db.insert(args.table, null, values);
+        if (rowId <= 0) 
+        	return null;
+
+        uri = ContentUris.withAppendedId(uri, rowId);
+        sendNotify(uri);
+
+        return uri;
+	}
+
+	@Override
+	public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
+		SqlArguments args = new SqlArguments(uri, selection, selectionArgs);
+		SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
+		qb.setTables(args.table);
+
+		SQLiteDatabase db = mDatabaseHelper.getWritableDatabase();
+		Cursor result = qb.query(db, projection, args.where, args.args, null, null, sortOrder);
+		result.setNotificationUri(getContext().getContentResolver(), uri);
+
+		return result;
+	}
+
+	@Override
+	public int update(Uri uri, ContentValues values, String where, String[] selectionArgs) {
+		SqlArguments args = new SqlArguments(uri, where, selectionArgs);
+
+        SQLiteDatabase db = mDatabaseHelper.getWritableDatabase();
+        int count = db.update(args.table, values, args.where, args.args);
+        if (count > 0) sendNotify(uri);
+
+        return count;
+	}
+	
+	
+	private static class DatabaseHelper extends SQLiteOpenHelper {
+		
+		private static final int DB_VERSION = 8;
+
+		private static final String TAG = "DatabaseHelper";
+		
+		private Context mContext;
+
+		private DatabaseHelper(Context context) {
+			super(context, Constants.DATABASE_NAME, null, DB_VERSION);
+			mContext = context;
+			Log.i(TAG, "DatabaseHelper constract");
+		}
+
+		public void onCreate(SQLiteDatabase db) {
+			dbInitailized = false;
+			Log.i(TAG, "onCreate start");
+
+			try {
+				db.beginTransaction();
+				StringBuilder sql = new StringBuilder();
+				sql.setLength(0);
+				sql.append("create table ").append(TABLE_BOOKMARK).append(" ( ");
+				sql.append(Bookmark.ID).append(" integer primary key autoincrement not null, ");
+				sql.append(Bookmark.CONTENTS_ID).append(" text not null, ");
+				sql.append(Bookmark.BOOKMARK_TYPE).append(" integer, ");
+				sql.append(Bookmark.BOOKMARK_PAGE).append(" integer, ");
+				sql.append(Bookmark.BOOKMARK_ALLPAGES + " integer, ");
+				sql.append(Bookmark.BOOKMARKED_DATE + " datetime, ");
+				// version3から追加
+				sql.append(Bookmark.USER_NO + " text default null, ");
+				// added columns in ver 7
+				{
+					sql.append(Bookmark.CONTENTS_FORMAT).append(" integer default 0, ");
+					sql.append(Bookmark.CHAR_INDEX + " integer, ");
+					sql.append(Bookmark.PAGE_STATE + " integer, ");
+					sql.append(Bookmark.FONT_SCALE + " float, ");
+					sql.append(Bookmark.XMDF_OFFSET + " integer, ");
+					sql.append(Bookmark.BS_KOMA_PAGE_NO + " integer, ");
+					sql.append(Bookmark.BS_KOMA_STEP_NO + " integer, ");
+					sql.append(Bookmark.BS_HYBRID_PAGE_NO + " integer, ");
+					sql.append(Bookmark.BS_HYBRID_KOMA_NO+ " integer ");
+				}
+				sql.append(")");
+				db.execSQL(sql.toString());
+
+				sql.setLength(0);
+				sql.append("create table ").append(TABLE_TITLE).append(" ( ");
+				sql.append(Title.ID).append(" integer primary key autoincrement not null, ");
+				sql.append(Title.TITLE_ID).append(" integer not null unique, ");
+				sql.append(Title.TITLE_NAME).append(" text, ");
+				sql.append(Title.TITLE_KANA).append(" text, ");
+				sql.append(Title.BOOK_TYPE).append(" integer, ");
+				sql.append(Title.NOT_YET_FLG).append(" integer, ");
+				sql.append(Title.LATEST_CONTENTS_ID).append(" text, ");
+				sql.append(Title.LATEST_CONTENTS_DATE).append(" datetime, ");
+	            // Version2から追加
+	            sql.append(Title.LAST_TARGET_DEVICE_TYPE ).append(" integer default 0 not null, ");
+	            // Version3から追加
+	            sql.append(Title.AUTHOR_NAME).append(" text default null, ");
+	            sql.append(Title.AUTHOR_NAME_KANA).append(" text default null, ");
+				sql.append("unique (").append(Title.TITLE_ID).append(") ");
+				sql.append(")");
+				db.execSQL(sql.toString());
+
+				sql.setLength(0);
+				sql.append("create table ").append(TABLE_CONTENT).append(" ( ");
+				sql.append(Contents.ID).append(" integer primary key autoincrement not null, ");
+				sql.append(Contents.TITLE_ID).append(" integer not null, ");
+				sql.append(Contents.CONTENTS_ID).append(" text not null, ");
+				sql.append(Contents.CONTENTS_IDX).append(" integer, ");
+				sql.append(Contents.CONTENTS_NAME).append(" text, ");
+				sql.append(Contents.VOL_STORY_FLG).append(" integer, ");
+				sql.append(Contents.FILE_NAME).append(" text, ");
+				sql.append(Contents.FILE_SIZE).append(" real, ");
+				sql.append(Contents.CONTENTS_FORMAT).append(" integer, ");
+				sql.append(Contents.DL_LIMIT).append(" datetime, ");
+				sql.append(Contents.DL_DATE).append(" datetime, ");
+				// Version2から追加
+				sql.append(Contents.PURCHASE_TARGET_DEVICE_TYPE).append(" integer default 0 not null, ");
+				// New hondana
+				sql.append(Contents.CONTENTS_TYPE).append(" integer default 1 not null, ");
+				sql.append(Contents.IS_DOWNLOADED).append(" integer default 0 not null, ");
+				sql.append(Contents.DL_POSITION).append(" integer default 0 not null, ");
+				sql.append(Contents.IS_DELETED).append(" integer default 0 not null, ");
+				sql.append(Contents.IS_READ).append(" integer default 0 not null, ");
+                sql.append(Contents.DOWNLOAD_FORMAT).append(" integer, ");
+                sql.append(Contents.FILE_VERSION).append(" integer, ");
+				//sql.append(Contents.IS_SAMPLE).append(" integer default 0 not null, ");
+				// Version3から追加
+				//sql.append(Contents.USER_NO).append(" text default null, ");
+				sql.append("unique(").append(Contents.TITLE_ID).append(",").append(Contents.CONTENTS_ID).append(") ");
+				sql.append(")");
+				db.execSQL(sql.toString());
+
+//				sql.setLength(0);
+//				sql.append("create table ").append(ContentsStatus.TABLE_NAME).append(" ( ");
+//				sql.append(ContentsStatus.ID).append(" integer primary key autoincrement not null, ");
+//				sql.append(ContentsStatus.CONTENTS_ID).append(" text not null unique, ");
+//				sql.append(ContentsStatus.FILE_EXISTS).append(" integer, ");
+//				sql.append(ContentsStatus.ORIENTATION).append(" integer ");
+//				sql.append(")");
+//				db.execSQL(sql.toString());
+//
+//	            // Version3から追加
+//	            sql.setLength(0);
+//	            sql.append("create table ").append(BookMarkConvert.TABLE_NAME).append(" ( ");
+//	            sql.append(BookMarkConvert.ID).append(" integer primary key autoincrement not null, ");
+//	            sql.append(BookMarkConvert.CONTENTS_ID).append(" text not null, ");
+//	            sql.append(BookMarkConvert.USER_NO).append(" text not null ");
+//	            sql.append(")");
+//	            db.execSQL(sql.toString());
+
+	            // Version4から追加
+	            sql.setLength(0);
+	            sql.append("create table ").append(TABLE_DOWNLOAD_QUEUE).append(" ( ");
+	            sql.append(DownloadQueue.ID).append(" integer primary key autoincrement not null, ");
+	            sql.append(DownloadQueue.TITLE_ID).append(" integer not null, ");
+	            sql.append(DownloadQueue.CONTENTS_ID).append(" text not null, ");
+	            sql.append(DownloadQueue.IMEI).append(" text not null, ");
+	            sql.append(DownloadQueue.CONTENTS_FORMAT).append(" integer not null, ");
+	            sql.append(DownloadQueue.ZERO_FLG).append(" integer not null default 0, ");
+	            sql.append(DownloadQueue.USER_ID).append(" text not null, ");
+	            sql.append(DownloadQueue.DL_STATUS).append(" integer not null default 0, ");
+	            sql.append(DownloadQueue.DL_ERROR_DETAIL).append(" text, ");
+	            sql.append(DownloadQueue.DL_START_DATE).append(" datetime, ");
+	            sql.append(DownloadQueue.CONTENT_LENGTH).append(" integer not null default 0,");
+	            // Version5から追加
+	            sql.append(DownloadQueue.UPDATE_DATE).append(" datetime, ");
+	            // Version6から追加
+	            sql.append(DownloadQueue.SAVE_DIR).append(" integer not null default ").append(DownloadQueue.SAVE_DIR_INTERNAL).append(" ");
+	            sql.append(")");
+	            db.execSQL(sql.toString());
+				
+				sql.setLength(0);
+				sql.append("create table ").append(TABLE_SAMPLE).append(" ( ");
+				sql.append(Sample.ID).append(" integer primary key autoincrement not null, ");
+				sql.append(Sample.TITLE_ID).append(" integer not null, ");
+				sql.append(Sample.CONTENTS_ID).append(" text, ");
+				sql.append(Sample.DL_DATE).append(" long not null, ");
+				sql.append("unique(").append(Sample.TITLE_ID).append(",").append(Sample.CONTENTS_ID).append(") ");
+				sql.append(")");
+				db.execSQL(sql.toString());
+
+//	            // Version5から追加
+//	            sql.setLength(0);
+//	            sql.append("create table ").append(DeletedContents.TABLE_NAME).append(" ( ");
+//				sql.append(DeletedContents.ID).append(" integer primary key autoincrement not null, ");
+//				sql.append(DeletedContents.TITLE_ID).append(" integer not null, ");
+//				sql.append(DeletedContents.CONTENTS_ID).append(" text not null");
+//	            sql.append(")");
+//	            db.execSQL(sql.toString());
+
+//	            sql.setLength(0);
+//	            sql.append("create table ").append(ContentsStatusWork.TABLE_NAME).append(" as select * from ").append(ContentsStatus.TABLE_NAME);
+//	            db.execSQL(sql.toString());
+//
+//	            sql.setLength(0);
+//	            sql.append("create table ").append(DownloadQueueWork.TABLE_NAME).append(" as select * from ").append(DownloadQueue.TABLE_NAME);
+//	            db.execSQL(sql.toString());
+
+	            //createEpubData(db);
+
+//				createDummyData(db);
+//				createManyDummyData(db);
+//				createBSHybridData(db);
+
+				db.setTransactionSuccessful();
+			} catch (SQLException e) {
+				e.printStackTrace();
+			} catch (Exception e) {
+				e.printStackTrace();
+			} finally {
+				db.endTransaction();
+			}
+			Log.i(TAG, "onCreate end");
+
+		}
+
+		@Override
+		public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+			Log.i(TAG, "onUpgrade start");
+			List<MigContentInfo> migContentInfoList = null;
+			ArrayList<BookmarkObject> bookmarkList = null;
+			try {
+				db.beginTransaction();
+				// Version1
+				if (oldVersion == 1) {
+
+					StringBuilder sql = new StringBuilder();
+					sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+							.append(Contents.PURCHASE_TARGET_DEVICE_TYPE).append(" integer ")
+							.append("default 0 not null");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_TITLE).append(" ADD ")
+							.append(Title.LAST_TARGET_DEVICE_TYPE).append(" integer ")
+							.append(" default 0 not null");
+					db.execSQL(sql.toString());
+				}
+
+				// Version2
+				if (oldVersion <= 2) {
+					StringBuilder sql = new StringBuilder();
+					sql.append("ALTER TABLE ").append(TABLE_TITLE).append(" ADD ")
+							.append(Title.AUTHOR_NAME).append(" text default null ");
+					db.execSQL(sql.toString());
+
+					sql = new StringBuilder();
+					sql.append("ALTER TABLE ").append(TABLE_TITLE).append(" ADD ")
+							.append(Title.AUTHOR_NAME_KANA).append(" text default null ");
+					db.execSQL(sql.toString());
+
+//					sql = new StringBuilder();
+//					sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+//							.append(Contents.USER_NO).append(" text default null ");
+//					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+							.append(Bookmark.USER_NO).append(" text default null ");
+					db.execSQL(sql.toString());
+
+//	                sql.setLength(0);
+//	                sql.append("create table ").append(BookMarkConvert.TABLE_NAME).append(" ( ");
+//	                sql.append(BookMarkConvert.ID).append(" integer primary key autoincrement not null, ");
+//	                sql.append(BookMarkConvert.CONTENTS_ID).append(" text not null, ");
+//	                sql.append(BookMarkConvert.USER_NO).append(" text not null ");
+//	                sql.append(")");
+//	                db.execSQL(sql.toString());
+				}
+
+				// version3
+				if (oldVersion <= 3) {
+	                StringBuilder sql = new StringBuilder();
+		            sql.setLength(0);
+		            sql.append("create table ").append(TABLE_DOWNLOAD_QUEUE).append(" ( ");
+		            sql.append(DownloadQueue.ID).append(" integer primary key autoincrement not null, ");
+		            sql.append(DownloadQueue.TITLE_ID).append(" integer not null, ");
+		            sql.append(DownloadQueue.CONTENTS_ID).append(" text not null, ");
+		            sql.append(DownloadQueue.IMEI).append(" text not null, ");
+		            sql.append(DownloadQueue.CONTENTS_FORMAT).append(" integer not null, ");
+		            sql.append(DownloadQueue.ZERO_FLG).append(" integer not null default 0, ");
+		            sql.append(DownloadQueue.USER_ID).append(" text not null, ");
+		            sql.append(DownloadQueue.DL_STATUS).append(" integer not null default 0, ");
+		            sql.append(DownloadQueue.DL_ERROR_DETAIL).append(" text, ");
+		            sql.append(DownloadQueue.DL_START_DATE).append(" datetime, ");
+		            sql.append(DownloadQueue.CONTENT_LENGTH).append(" integer not null default 0) ");
+		            db.execSQL(sql.toString());
+				}
+
+				// version4
+				if (oldVersion <= 4) {
+	                StringBuilder sql = new StringBuilder();
+
+	                sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_DOWNLOAD_QUEUE).append(" ADD ")
+		            		.append(DownloadQueue.UPDATE_DATE).append(" datetime");
+					db.execSQL(sql.toString());
+
+//					sql.setLength(0);
+//		            sql.append("create table ").append(ContentsStatusWork.TABLE_NAME).append(" as select * from ").append(ContentsStatus.TABLE_NAME);
+//		            db.execSQL(sql.toString());
+//
+//		            sql.setLength(0);
+//		            sql.append("create table ").append(DownloadQueueWork.TABLE_NAME).append(" as select * from ").append(DownloadQueue.TABLE_NAME);
+//		            db.execSQL(sql.toString());
+				}
+
+				// version5
+				if (oldVersion <= 5) {
+				    StringBuilder sql = new StringBuilder();
+
+//		            sql.setLength(0);
+//		            sql.append("create table ").append(DeletedContents.TABLE_NAME).append(" ( ");
+//					sql.append(DeletedContents.ID).append(" integer primary key autoincrement not null, ");
+//					sql.append(DeletedContents.TITLE_ID).append(" integer not null, ");
+//					sql.append(DeletedContents.CONTENTS_ID).append(" text not null");
+//		            sql.append(")");
+//		            db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_DOWNLOAD_QUEUE).append(" ADD ");
+					sql.append(DownloadQueue.SAVE_DIR).append(" integer not null default ").append(DownloadQueue.SAVE_DIR).append(" ");
+					db.execSQL(sql.toString());
+				}
+
+				// For migration, get content list
+				Cursor cursor = db.rawQuery("SELECT * FROM contents", null);
+				migContentInfoList = new ArrayList<MigContentInfo>();
+				while(cursor.moveToNext()) {
+					MigContentInfo migContentInfo = new MigContentInfo();
+					migContentInfo.contentId = cursor.getString(cursor.getColumnIndex(Contents.CONTENTS_ID));
+					migContentInfo.contentFormat = (int)cursor.getLong(cursor.getColumnIndex(Contents.CONTENTS_FORMAT));
+					migContentInfoList.add(migContentInfo);
+				}
+				
+				if(oldVersion <= 7) {
+					//TODO Drop tables not used.
+					// Tables to drop are "ContentsStatus/ContentsStatusWork/DeletedContents/BookMarkConvert/DownloadQueueWork"
+					
+					// Alter tables to add newly needed columns
+					StringBuilder sql = new StringBuilder();
+					
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+					.append(Contents.CONTENTS_TYPE).append(" integer not null default 1");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+					.append(Contents.IS_DOWNLOADED).append(" integer not null default 0");
+					db.execSQL(sql.toString());
+					
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+					.append(Contents.DL_POSITION).append(" integer default 0 not null");
+					db.execSQL(sql.toString());
+					
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+					.append(Contents.IS_DELETED).append(" integer default 0 not null");
+					db.execSQL(sql.toString());
+					
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+					.append(Contents.IS_READ).append(" integer default 0 not null");
+					db.execSQL(sql.toString());
+
+                    sql.setLength(0);
+                    sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+                    .append(Contents.DOWNLOAD_FORMAT).append(" integer");
+                    db.execSQL(sql.toString());
+                    
+                    //// Update download_format
+                    //update to added column
+                    sql.setLength(0);
+                    sql.append("UPDATE ").append(TABLE_CONTENT).append(" SET ").append(Contents.DOWNLOAD_FORMAT).append(" = ").append(Contents.CONTENTS_FORMAT);
+                    db.execSQL(sql.toString());
+                    //// end of Update download_format
+
+                    sql.setLength(0);
+                    sql.append("ALTER TABLE ").append(TABLE_CONTENT).append(" ADD ")
+                    .append(Contents.FILE_VERSION).append(" integer");
+                    db.execSQL(sql.toString());
+
+					// Alter Bookmark
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.CONTENTS_FORMAT).append(" integer default 0");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.CHAR_INDEX).append(" integer");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.PAGE_STATE).append(" integer");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.FONT_SCALE).append(" float");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.XMDF_OFFSET).append(" integer");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.BS_KOMA_PAGE_NO).append(" integer");
+					db.execSQL(sql.toString());
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.BS_KOMA_STEP_NO).append(" integer");
+					db.execSQL(sql.toString());
+
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.BS_HYBRID_PAGE_NO).append(" integer");
+					db.execSQL(sql.toString());
+					sql.setLength(0);
+					sql.append("ALTER TABLE ").append(TABLE_BOOKMARK).append(" ADD ")
+					.append(Bookmark.BS_HYBRID_KOMA_NO).append(" integer");
+					db.execSQL(sql.toString());
+					
+					//Create sample table
+					sql.setLength(0);
+					sql.append("create table ").append(TABLE_SAMPLE).append(" ( ");
+					sql.append(Sample.ID).append(" integer primary key autoincrement not null, ");
+					sql.append(Sample.TITLE_ID).append(" integer not null, ");
+					sql.append(Sample.CONTENTS_ID).append(" text, ");
+					sql.append(Sample.DL_DATE).append(" long not null, ");
+					sql.append("unique(").append(Sample.TITLE_ID).append(",").append(Sample.CONTENTS_ID).append(") ");
+					sql.append(")");
+					db.execSQL(sql.toString());
+				}
+
+				db.setTransactionSuccessful();
+			} catch (SQLException e) {
+				e.printStackTrace();
+			} catch (Exception e) {
+				e.printStackTrace();
+			} finally {
+				
+				// For migration, get bookmark object list
+				Log.i("MIG", "[EBookProvider#MoveToNextState()] Start Mig >>>>>>>>>>>>>>>>>>>>>>");
+				Cursor cursor = db.rawQuery("SELECT * FROM bookmark", null);
+				bookmarkList = BookmarkInfo.fromCursor(cursor);
+				
+				OldBookmarkMigration dbMig = new OldBookmarkMigration();
+//				dbMig.dumpBookmarkList(bookmarkList);
+//				dbMig.dumpMigContentInfo(migContentInfoList);
+				dbMig.migration(mContext, db, migContentInfoList, bookmarkList, oldVersion);
+				
+//				migXmdfSettings();
+				migSettings();
+				deleteXmdfKeyDirConfig();
+				Log.i("MIG", "[EBookProvider#MoveToNextState()] End Mig   >>>>>>>>>>>>>>>>>>>>>>");
+				db.endTransaction();
+			}
+			
+			if(oldVersion < newVersion) {
+				android.util.Log.d("hsw_dbg", " before calling put boolean");
+			    EbookPreferences.remove(EbookPreferences.LAST_SYNC_DATE);
+				EbookPreferences.putBoolean(EbookPreferences.STARTING_KEY, true);
+			}
+		}
+		
+		private void migXmdfSettings() {
+			String magnify = EbookPreferences.getString(EbookPreferences.XMDF_COMIC_MAGNIFY, "");
+			String singleMag = "等倍";
+			String doubleMag = "2倍";
+			String tripleMag = "3倍";
+			Log.i("MIG", "[XMDF_settings] magnify=" + magnify);
+			T_BookConfig bookConfig = DaoFactory.getInstance(mContext).getBookConfig();
+			if(magnify.equals(singleMag)) {
+				bookConfig.insert(T_BookConfig.KEY_MAGNIFY, FontInfoDef.MAGNIFY_NORMAL);
+			} else if(magnify.equals(doubleMag)) {
+				bookConfig.insert(T_BookConfig.KEY_MAGNIFY, FontInfoDef.MAGNIFY_DOUBLE_SIZE);			
+			} else if(magnify.equals(tripleMag)) {
+				bookConfig.insert(T_BookConfig.KEY_MAGNIFY, FontInfoDef.MAGNIFY_TRIPLE_SIZE);			
+			}
+		}
+		
+		private void deleteXmdfKeyDirConfig() {
+			T_BookConfig bookConfig = DaoFactory.getInstance(mContext).getBookConfig();
+			bookConfig.deleteDirectionFromPrevVer();
+			Log.d("MIG", "[deleteXmdfKeyConfig] Deleted Key DIR config");
+		}
+		
+		private void migSettings() {
+		    String notiVibEnable = "通知する";
+		    String notiVibDisable = "通知しない";
+		    
+			String vibration = EbookPreferences.getString(EbookPreferences.NOTI_VIBRATION, notiVibEnable);
+			Log.i("MIG", "[vib_settings] vibration=" + vibration);
+			if(vibration.equals(notiVibEnable)) {
+				EbookPreferences.putBoolean(EbookPreferences.SETTING_COMPLETE_VIBRATION, true);
+			} else {
+				EbookPreferences.putBoolean(EbookPreferences.SETTING_COMPLETE_VIBRATION, false);
+			}
+		}
+	}
+	
+	
+	
+	private static List<TitleInfo> getAllOldTitlesInTransaction(SQLiteDatabase db) {
+		final Cursor cursorTitles = db.query(TABLE_TITLE, null, null, null, null, null, null);
+		List<TitleInfo> titles = TitleInfo.fromCursor(cursorTitles);
+		cursorTitles.close();
+		
+		// Load Contents
+		for(TitleInfo titleInfo : titles) {
+			final String titleId = String.valueOf(titleInfo.titleId);
+			final Cursor cursorContents = db.query(TABLE_CONTENT, null, Title.TITLE_ID + "=?", new String[]{titleId}, null, null, null);
+			final List<ContentInfo> allContents = ContentInfo.fromOldCursor(cursorContents);
+			titleInfo.setContents(allContents);
+			cursorContents.close();
+		}
+		
+		return titles;
+	}
+	
+	private void upgradeTitles(SQLiteDatabase db) {
+		
+	}
+	
+	private void sendNotify(Uri uri) {
+		getContext().getContentResolver().notifyChange(uri, null);
+    }
+	
+	private static class SqlArguments {
+        public final String table;
+        public final String where;
+        public final String[] args;
+
+        SqlArguments(Uri url, String where, String[] args) {
+            if (url.getPathSegments().size() == 1) {
+                this.table = url.getPathSegments().get(0);
+                this.where = where;
+                this.args = args;
+            } else if (url.getPathSegments().size() != 2) {
+                throw new IllegalArgumentException("Invalid URI: " + url);
+            } else if (!TextUtils.isEmpty(where)) {
+                throw new UnsupportedOperationException("WHERE clause not supported: " + url);
+            } else {
+                this.table = url.getPathSegments().get(0);
+                this.where = "_id=" + ContentUris.parseId(url);
+                this.args = null;
+            }
+        }
+
+        SqlArguments(Uri url) {
+            if (url.getPathSegments().size() == 1) {
+                table = url.getPathSegments().get(0);
+                where = null;
+                args = null;
+            } else {
+                throw new IllegalArgumentException("Invalid URI: " + url);
+            }
+        }
+    }
+
+}

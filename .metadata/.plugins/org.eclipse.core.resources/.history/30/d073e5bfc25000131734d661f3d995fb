@@ -1,0 +1,381 @@
+package jp.co.nttdocomo.ebook.auth;
+
+import android.app.Activity;
+import android.app.Service;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.net.ConnectivityManager;
+import android.net.Uri;
+import android.view.View;
+import android.webkit.CookieManager;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+
+import jp.co.nttdocomo.ebook.Constants;
+import jp.co.nttdocomo.ebook.DcmLog;
+import jp.co.nttdocomo.ebook.EbookLauncher;
+import jp.co.nttdocomo.ebook.R;
+import jp.co.nttdocomo.ebook.Util;
+import jp.co.nttdocomo.ebook.server.HondanaHttpClient;
+import jp.co.nttdocomo.ebook.server.HttpCommunicationService;
+import jp.co.nttdocomo.ebook.server.ServerInterface;
+
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.ResponseHandler;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.util.EntityUtils;
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserFactory;
+
+import java.io.IOException;
+import java.io.StringReader;
+import java.util.Arrays;
+import java.util.List;
+
+public class CertificationClient extends WebViewClient {
+    private static final String TAG = CertificationClient.class.getSimpleName();
+
+	private static final String SCHEME_HTTP = "http";
+
+	private String mEndUrl = null;
+	private String mSiteUrl = null;
+	private String mLoginUrl = null;
+	private Activity mActivity = null;
+	private boolean mShowDialog = false;
+	private boolean mClearHist = false;
+	private boolean mIsVisible = true;
+	private boolean mDispFlg = false;
+	private boolean mChangeVisibility = false;
+	private boolean mErrorOccured = false;
+	private boolean mDocomoIdFlg = false;
+	private static final String cfgSmtDocomo = "cfg.smt.docomo.ne.jp";
+	private static final String cfgDmtDocomoNoCookie = "cfg.smt.docomo.ne.jp/authx/cgi/baseauth";
+	private static final String cfgDmtDocomoLogin = "cfg.smt.docomo.ne.jp/auth/cgi/anidlogin";
+	private static final String cfgDmtDocomoLoginNoCookie = "cfg.smt.docomo.ne.jp/auth/cgi/idauth";
+	private static final String cfgDmtDocomoTop = "book.dmkt-sp.jp/top";
+	private static final String cfgDmtDocomoError = "i.mydocomo.com/oid/lg/login";
+	private static final String cfgDmtDocomoError2 = "i.mydocomo.com/oid/authresp";
+
+	private OnStartLoginListener mOnStartLoginListener;
+	
+	private UserLoginCallback mUserLoginCallback = null;
+
+	private static final List<String> sOUT_URL = Arrays.asList(
+			"book.dmkt-sp.jp",
+			"i.mydocomo.com",
+			"cfg.smt.docomo.ne.jp");
+
+	public interface OnStartLoginListener {
+		public void startLogin();
+		public void endLogin();
+		public void loginError(int errorCode);
+	}
+	
+	private OnProxyMaintenanceListener mOnProxyMaintenanceListener;
+
+	public interface OnProxyMaintenanceListener {
+		public void onProxyMaintenance();
+	}
+
+	public void setOnProxyMaintenanceListener(OnProxyMaintenanceListener l) {
+		mOnProxyMaintenanceListener = l;
+	}
+
+	public void setOnStartLoginListener(OnStartLoginListener l) {
+		mOnStartLoginListener = l;
+	}
+	
+	public CertificationClient(EbookLauncher activity, String site_url, String end_url, boolean isVisible, boolean docomoIdFlg) {
+		mActivity = activity;
+		mUserLoginCallback = activity;
+		mSiteUrl = site_url.substring(site_url.indexOf("://") + 3);
+		mEndUrl = end_url.substring(end_url.indexOf("://") + 3);
+		mIsVisible = isVisible;
+		mDocomoIdFlg = docomoIdFlg;
+		if(isVisible)
+			this.mShowDialog = true;
+		mLoginUrl = ServerInterface.getApiUrl(activity.getApplicationContext(),
+				ServerInterface.API_USER_LOGIN).substring(site_url.indexOf("://") + 3);
+	}
+
+	public CertificationClient(Activity activity, String site_url, String end_url, boolean docomoIdFlg) {
+		this.mActivity = activity;
+		this.mSiteUrl = site_url.substring(site_url.indexOf("://") + 3);
+		this.mEndUrl = end_url.substring(end_url.indexOf("://") + 3);
+		this.mShowDialog = true;
+		mLoginUrl = ServerInterface.getApiUrl(activity.getApplicationContext(),
+				ServerInterface.API_USER_LOGIN).substring(site_url.indexOf("://") + 3);
+	}
+	
+	
+
+	/* (non-Javadoc)
+	 * @see android.webkit.WebViewClient#shouldOverrideUrlLoading(android.webkit.WebView, java.lang.String)
+	 */
+	@Override
+	public boolean shouldOverrideUrlLoading(WebView view, String url) {
+		android.util.Log.d("hsw_dbg", " QWM url = " + url);
+		return super.shouldOverrideUrlLoading(view, url);
+	}
+
+	@Override
+	public void onPageStarted(WebView view, String url, Bitmap favicon) {
+	    DcmLog.i(TAG, "QWM onPageStarted() url " + url);
+	    super.onPageStarted(view, url, favicon);
+
+	    if(mErrorOccured) {
+	    	view.stopLoading();
+	    	return;
+	    }
+
+		if(mActivity != null) {
+			if(!mDispFlg && !mIsVisible)
+				view.setVisibility(View.INVISIBLE);
+			if(mActivity.getClass().equals(EbookLauncher.class)) {
+				((EbookLauncher)mActivity).changeSplashVisibility(!mDispFlg);
+			}
+			if(mChangeVisibility) {
+				view.setVisibility(View.INVISIBLE);
+				if(mActivity.getClass().equals(EbookLauncher.class)) {
+					((EbookLauncher)mActivity).changeSplashVisibility(true);
+				}
+			}
+		}
+
+		if(url.contains(cfgDmtDocomoLogin) || url.contains(cfgDmtDocomoLoginNoCookie)) {
+			if(mShowDialog) {
+				if(mOnStartLoginListener != null)
+					mOnStartLoginListener.startLogin();
+			}
+		}
+
+		if(mChangeVisibility) {
+			mIsVisible = true;
+			mShowDialog = true;
+		}
+
+		for(String domain:sOUT_URL) {
+			if(url.contains(domain)) {
+				return;
+			}
+		}
+
+		view.stopLoading();
+		
+		Intent intent = new Intent();
+		intent.setAction(Intent.ACTION_VIEW);
+////	intent.addCategory(Intent.CATEGORY_BROWSABLE);
+//		Standard Browser... will not work
+////	intent.setClassName("com.android.browser", "com.android.browser.BrowserActivity");
+		intent.setData(Uri.parse(url));
+		view.getContext().startActivity(intent);
+	}
+
+	@Override
+	public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+        DcmLog.i(TAG, "QWM onReceivedError() err " + errorCode + ": " + description);
+		super.onReceivedError(view, errorCode, description, failingUrl);
+
+		int error = 0;
+		final WebView webView = (WebView)this.mActivity.findViewById(R.id.webview);
+		if(errorCode < 0) {
+			mErrorOccured = true;
+			webView.stopLoading();
+			error = Constants.ERROR_CODE_LOGIN_ERROR;
+			mChangeVisibility = true;
+			mIsVisible = true;
+			mShowDialog = true;
+			view.setVisibility(View.VISIBLE);
+			if(mActivity != null && mActivity.getClass().equals(EbookLauncher.class)) {
+				((EbookLauncher)mActivity).changeSplashVisibility(false);
+			}
+		}
+
+		if(mOnStartLoginListener != null)
+			mOnStartLoginListener.loginError(error);
+	}
+
+	@Override
+	public void onPageFinished(WebView view, String url) {
+        DcmLog.i(TAG, "QWM onPageFinished() url " + url);
+		if(url.contains(cfgSmtDocomo)) {
+			if(!mClearHist) {
+				view.clearHistory();
+				mClearHist = true;
+			}
+		}
+
+	    if(mErrorOccured) {
+	    	return;
+	    }
+
+		if (url.contains(mEndUrl)) {
+			DcmLog.i(TAG, "QWM onPageFinished() alert to finish");
+			HttpGet pageGet = new HttpGet(url);
+
+		    ResponseHandler<String> pageHandler = new ResponseHandler<String>() {
+		        public String handleResponse(HttpResponse response) throws ClientProtocolException, IOException {
+		            HttpEntity entity = response.getEntity();
+		            String html; 
+		            if (entity != null) {
+		                html = EntityUtils.toString(entity);
+		                return html;
+		            } else {
+		                return null;
+		            }
+		        }
+		    };
+		    
+		    HondanaHttpClient client = new HondanaHttpClient();
+		    String htmlString = null;
+		    try {
+		    	htmlString = client.execute(pageGet, pageHandler);
+			} catch (ClientProtocolException e) {
+				e.printStackTrace();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		    
+		    CookieManager cookieManager = CookieManager.getInstance();
+			String cookieId = cookieManager.getCookie(url);
+			StringBuilder response = new StringBuilder();
+
+			try {
+				cookieId = cookieId.substring(cookieId.lastIndexOf("="), cookieId.length());
+				response.append("Result=OK\n");
+				response.append("SessionID").append(cookieId).append("\n");
+				response.append("UserNo=").append(getUserNo(htmlString));
+				mUserLoginCallback.onSuccessUserMyId(response.toString(), mDocomoIdFlg);
+			} finally {
+			}
+		    
+		} else if(url.contains(mLoginUrl)) {
+			DcmLog.i(TAG, "QWM onPageFinished() login api called and check for proxy maintenance");
+			//String script = "javascript:alert( document.documentElement.outerHTML.toString());";
+			//view.loadUrl(script);
+			
+			if(url.contains(mLoginUrl)) {
+
+				final int bodyStart = htmlString.indexOf("<body>");
+				final int bodyEnd = htmlString.indexOf("</body>");
+				if(bodyStart >= 0 && bodyEnd >= 0) {
+					final String bodyString = htmlString.substring(bodyStart + 6, bodyEnd).replace("<br />", "").replace("<br>", "").replace("\r", "").replace("\n", "");
+					if(bodyString.equals(HttpCommunicationService.MAINTENANCE_PROXY)) {
+						if(mOnProxyMaintenanceListener != null)
+							mOnProxyMaintenanceListener.onProxyMaintenance();
+					}
+				}
+			}
+		} else if(url.contains(Util.getSecurityMaintenanceUrl(mActivity).toString())) {
+//				|| url.contains("stg.book.dmkt-sp.jp/api/user/login")) {
+			DcmLog.i(TAG, "QWM onPageFinished() in maintenance");
+			DcmLog.i(TAG, "QWM onPageFinished() mShowDialog : " + mShowDialog + ", mIsVisible : " + mIsVisible);
+			DcmLog.i(TAG, "QWM onPageFinished() listener : " + mOnStartLoginListener + ", activity : " + mActivity);
+			view.stopLoading();
+			if(mShowDialog) {
+				if(mOnStartLoginListener != null)
+					mOnStartLoginListener.endLogin();
+			}
+			if(mActivity != null && mIsVisible) {
+				view.setVisibility(View.VISIBLE);
+				mDispFlg = true;
+				if(mActivity.getClass().equals(EbookLauncher.class)) {
+					((EbookLauncher)mActivity).changeSplashVisibility(!mDispFlg);
+				}
+			}
+			if(mOnStartLoginListener != null) {
+				mOnStartLoginListener.loginError(Util.getErrorCode(401)); // maintenance
+			}
+		} else if(url.contains(cfgSmtDocomo)
+				|| url.contains(cfgDmtDocomoNoCookie)
+				|| url.contains(cfgDmtDocomoTop)
+				|| url.contains(cfgDmtDocomoError)
+				|| url.contains(cfgDmtDocomoError2)) {
+			DcmLog.i(TAG, "QWM onPageFinished() error occurs.");
+			DcmLog.i(TAG, "QWM onPageFinished() mShowDialog : " + mShowDialog + ", mIsVisible : " + mIsVisible);
+			DcmLog.i(TAG, "QWM onPageFinished() listener : " + mOnStartLoginListener + ", activity : " + mActivity);
+			if(mActivity != null && !mIsVisible) {
+				if(!mChangeVisibility) {
+					ConnectivityManager cm = (ConnectivityManager)mActivity.getSystemService(Service.CONNECTIVITY_SERVICE);
+					if(cm.getActiveNetworkInfo().getType() != ConnectivityManager.TYPE_MOBILE) {
+						mChangeVisibility = true;
+						mIsVisible = true;
+						mShowDialog = true;
+					}
+				}
+			}
+
+			if(mShowDialog) {
+				if(mOnStartLoginListener != null)
+					mOnStartLoginListener.endLogin();
+			}
+
+			if(mActivity != null) {
+				if(mIsVisible) {
+					view.setVisibility(View.VISIBLE);
+					mDispFlg = true;
+					if(mActivity.getClass().equals(EbookLauncher.class)) {
+						((EbookLauncher)mActivity).changeSplashVisibility(!mDispFlg);
+					}
+				}
+			}
+		} else if (!url.contains(mSiteUrl)) {
+			DcmLog.i(TAG, "QWM onPageFinished() loading wierd page.");
+			DcmLog.i(TAG, "QWM onPageFinished() activity : " + mActivity + ", mIsVisible : " + mIsVisible);
+			if(mActivity != null) {
+				if(mIsVisible) {
+					view.setVisibility(View.VISIBLE);
+					mDispFlg = true;
+					if(mActivity.getClass().equals(EbookLauncher.class)) {
+						((EbookLauncher)mActivity).changeSplashVisibility(!mDispFlg);
+					}
+				} else {
+					view.setVisibility(View.VISIBLE);
+					mChangeVisibility = true;
+					if(mActivity.getClass().equals(EbookLauncher.class)) {
+						((EbookLauncher)mActivity).changeSplashVisibility(false);
+					}
+				}
+			}
+		}
+	}
+	
+	private String getUserNo(String src) {
+
+		final String USER_NO = "user_no";
+
+		try {
+			XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
+			XmlPullParser parser = factory.newPullParser();
+			parser.setInput(new StringReader(src));
+			int eventType = parser.getEventType();
+	         while (eventType != XmlPullParser.END_DOCUMENT) {
+	          if(eventType == XmlPullParser.START_TAG) {
+	        	  if(parser.getName().equals("input")) {
+	        		  int count = parser.getAttributeCount();
+
+	        		  String tagName = null;
+	        		  String tagValue = null;
+	        		  for(int i = 0; i < count; i++) {
+	        			  if(parser.getAttributeName(i).equals("name")) {
+	        				  tagName = parser.getAttributeValue(i);
+	        			  } else if(parser.getAttributeName(i).equals("value")) {
+	        				  tagValue = parser.getAttributeValue(i);
+	        			  }
+	        		  }
+	        		  if(tagName.equals(USER_NO)) {
+	        			  return tagValue;
+	        		  }
+	        	  }
+	          }
+	          eventType = parser.next();
+	         }
+
+			return null;
+		} catch (Exception e) {
+			return null;
+		}
+	}
+}

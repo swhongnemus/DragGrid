@@ -1,0 +1,75 @@
+package jp.co.nttdocomo.ebook;
+
+import android.app.Application;
+import android.content.Context;
+import android.content.res.Configuration;
+import android.os.Build;
+import android.webkit.CookieSyncManager;
+import android.webkit.WebView;
+
+import jp.co.nttdocomo.ebook.EbookSettings.DownloadQueue;
+import jp.co.nttdocomo.ebook.server.HttpCommunicationService;
+
+public class EbookApplication extends Application {
+	
+	private ImageCache mImageCache;
+    private static boolean sIsScreenLarge;
+    private static boolean sIsUseTextureView;
+	
+	private EbookModel mModel;
+
+	@Override
+	public void onCreate() {
+		if(Debug.DEBUG)
+			new WebView(this);
+
+		//TODO Test only code
+		EbookModel.clearAllRecords(this, DownloadQueue.CONTENT_URI);
+		CookieSyncManager.createInstance(this);
+		
+		try {
+			Thread.sleep(100);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+
+		mModel = new EbookModel(this);
+		
+		EbookPreferences.initPreferences(getApplicationContext());
+		
+		HttpCommunicationService.getUserAgent(this);
+		super.onCreate();
+		if(Debug.TABLET_CHECK_USING_PACKAGENAME)
+			sIsScreenLarge = getPackageName().endsWith("_t");
+		else
+			sIsScreenLarge = getResources().getBoolean(R.bool.is_large_screen);
+		sIsUseTextureView = Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH ? true : false;
+
+		if(mImageCache == null)
+			mImageCache = new ImageCache();
+		Util.loadSystemDefaultFont(this);
+	}
+	
+	public EbookModel getModel() {
+		return mModel;
+	}
+	
+	public ImageCache getImageCache() {
+		if(mImageCache == null)
+			mImageCache = new ImageCache();
+		return mImageCache;
+	}
+	
+	public static boolean isScreenLarge() {
+        return sIsScreenLarge;
+    }
+	
+	public static boolean isUseTextureView() {
+        return sIsUseTextureView;
+    }
+	
+	public static boolean isScreenLandscape(Context context) {
+        return context.getResources().getConfiguration().orientation ==
+            Configuration.ORIENTATION_LANDSCAPE;
+    }
+}

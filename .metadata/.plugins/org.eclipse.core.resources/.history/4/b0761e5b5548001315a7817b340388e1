@@ -1,0 +1,328 @@
+package jp.co.nttdocomo.ebook.viewer;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
+import android.net.Uri;
+import android.os.Bundle;
+import android.support.v4.app.DialogFragment;
+import android.support.v4.app.FragmentManager;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.TextView;
+
+import jp.co.nttdocomo.ebook.Constants;
+import jp.co.nttdocomo.ebook.ContentInfo;
+import jp.co.nttdocomo.ebook.EbookApplication;
+import jp.co.nttdocomo.ebook.ExtraKeys;
+import jp.co.nttdocomo.ebook.R;
+import jp.co.nttdocomo.ebook.TitleInfo;
+import jp.co.nttdocomo.ebook.Util;
+import jp.co.nttdocomo.ebook.viewer.ViewerMenuDefaultFragment.MenuCallback;
+
+import java.util.Date;
+
+public class NextContentFragment extends DialogFragment {
+	@SuppressWarnings("unused")
+	private static final String TAG = "NextContentFragment";
+
+	private String mContentName;
+	private long mTitleId;
+	private String mContentId;
+	private boolean mIsSample;
+	private boolean mIsPurchased;
+	private boolean mIsDeleted;
+	private long mDownloadLimit;
+	private boolean mIsDownloaded;
+	private int mFormat;
+	private boolean mNextContentNotExist;
+	private BitmapDrawable mTitleImage;
+    private boolean mIsLastPage;
+
+	private int mThumbnailWidth;
+	private int mThumbnailHeight;
+
+	@Override
+	public void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+
+		final Resources r = getResources();
+		mThumbnailWidth = r.getDimensionPixelSize(R.dimen.cover_image_list_width);
+		mThumbnailHeight = r.getDimensionPixelSize(R.dimen.cover_image_list_height);
+
+		Bundle args = getArguments();
+		if(args != null) {
+			mIsSample = args.getBoolean(ExtraKeys.SAMPLE_FLG, false);
+			mContentName = args.getString(ExtraKeys.CONTENTS_NAME);
+			mFormat = args.getInt(ExtraKeys.CONTENTS_FORMAT, -1);
+			mIsDownloaded = args.getBoolean(ExtraKeys.DOWNLOADING_FLG, false);
+			mIsPurchased = args.getBoolean(ExtraKeys.PURCHASE_FLG, false);
+			mIsDeleted = args.getBoolean(ExtraKeys.DELETE_FLG, false);
+			mDownloadLimit = args.getLong(ExtraKeys.DL_LIMIT_FLG, -1); 
+			mTitleId = args.getLong(TitleInfo.TITLE_ID, 0);
+			mContentId = args.getString(ExtraKeys.CONTENTS_ID);
+			mNextContentNotExist = args.getBoolean(ExtraKeys.NEXT_CONTENTS_NOT_EXIST);
+			mIsLastPage = args.getBoolean(ExtraKeys.IS_LAST_PAGE, false);
+
+			if(!mNextContentNotExist) {
+				Bitmap image = Util.getTitleImage(getActivity(), mTitleId, mContentId);
+				if (image != null) {
+					mTitleImage = new BitmapDrawable(r, image);
+					if(mTitleImage != null)
+						mTitleImage.setBounds(0, 0, mThumbnailWidth, mThumbnailHeight);
+				}
+			}
+		}
+	}
+
+	private View.OnClickListener mClickListener = new View.OnClickListener() {
+		@Override
+		public void onClick(View v) {
+			final Activity activity = getActivity();
+			int id = v.getId();
+			Uri uri = null;
+
+			boolean isFinish = false;
+			switch(id) {
+				case R.id.btn_dialog_goto_booklist:
+					if(mIsSample) {
+						uri = Util.getBookDetailUrl(activity, mTitleId, mContentId);
+						if(uri != null)
+							Util.startWebActivityCheckNetworkState(activity, uri);
+						dismiss();
+						if(activity != null && activity instanceof MenuCallback) {
+							((MenuCallback)activity).popViewerToState("VIEWER_MAIN");
+						}
+					} else {
+						dismiss();
+						activity.finish();
+					}
+					break;
+
+				case R.id.btn_dialog_goto_store:
+					uri = Util.getStoreTopUrl(activity);
+					if(uri != null)
+						Util.startWebActivityCheckNetworkState(activity, uri);
+					dismiss();
+					if(activity != null && activity instanceof MenuCallback) {
+						//((MenuCallback)activity).popViewerToState("VIEWER_MAIN");
+						activity.finish();
+					}
+					break;
+
+				case R.id.dialog_btn_view:
+					boolean finishActivity = true;
+					if(mIsSample) {
+					    if(mIsPurchased && !mIsDeleted) {
+                            if(activity != null && activity instanceof MenuCallback) {
+                                ((MenuCallback)activity).playSampleContent();
+                                dismiss();
+                                break;
+                            }
+                        } else if(mIsPurchased) {
+                            uri = Util.getBookDownloadUrl(activity, mTitleId, mContentId);
+                            if(uri != null)
+                            	finishActivity = Util.startWebActivityCheckNetworkState(activity, uri);
+//                            dismiss();
+                            if(activity != null && activity instanceof MenuCallback) {
+                                ((MenuCallback)activity).popViewerToState("VIEWER_MAIN");
+                            }
+                        } else if(mContentId != null && !mContentId.equals("")) {
+                            uri = Util.getBookPurchaseUrl(activity, mTitleId, mContentId);
+                            if(uri != null)
+                            	finishActivity = Util.startWebActivityCheckNetworkState(activity, uri);
+//                            dismiss();
+                            if(activity != null && activity instanceof MenuCallback) {
+                                ((MenuCallback)activity).popViewerToState("VIEWER_MAIN");
+                            }
+                        } else {
+                            uri = Util.getBuyContinueUrl(activity, mTitleId);
+                            if(uri != null)
+                            	finishActivity = Util.startWebActivityCheckNetworkState(activity, uri);
+//                            dismiss();
+                            if(activity != null && activity instanceof MenuCallback) {
+                                ((MenuCallback)activity).popViewerToState("VIEWER_MAIN");
+                            }
+                        }
+                        
+                        if(activity != null && finishActivity)
+                        	activity.finish();
+                        else
+                        	dismiss();
+					} else {
+						if(mNextContentNotExist) {
+							if(activity != null && activity instanceof MenuCallback) {
+								((MenuCallback)activity).showNoNextContentDialog();
+							}
+							dismiss();
+							break;
+						}
+
+						if(mIsPurchased) {
+							Date nowDate = new Date();
+							long curDate = nowDate.getTime();
+							if(curDate > mDownloadLimit) {
+								uri = Util.getBookDownloadUrl(activity, mTitleId, mContentId);
+								if(uri != null)
+									finishActivity = Util.startWebActivityCheckNetworkState(activity, uri);
+							} else if(mIsDeleted) {
+								if(curDate <= mDownloadLimit) {
+									uri = Util.getBookDownloadUrl(activity, mTitleId, mContentId);
+								} else {
+									uri = Util.getBookPurchaseUrl(activity, mTitleId, mContentId);
+								}
+								if(uri != null)
+									finishActivity = Util.startWebActivityCheckNetworkState(activity, uri);
+
+//								dismiss();
+//								if(activity != null && activity instanceof MenuCallback) {
+//									((MenuCallback)activity).popViewerToState("VIEWER_MAIN");
+//								}
+							} else {
+								Intent data = new Intent();
+								Bundle extras = new Bundle();
+								if(mIsDownloaded) {
+									// go to read next content
+									extras.putInt(ExtraKeys.ERROR_CODE, Constants.VIEWER_RESULT_PLAY_NEXT_CONTENT);
+								} else {
+									// download next content
+									extras.putInt(ExtraKeys.ERROR_CODE, Constants.VIEWER_RESULT_DOWNLOAD_NEXT_CONTENT);
+								}
+								extras.putString(ExtraKeys.NEXT_CONTENTS_ID, mContentId);
+								extras.putLong(TitleInfo.TITLE_ID, mTitleId);
+								data.putExtras(extras);
+								if(mFormat == Constants.CONTENTS_BOOK_FORMAT_BS) {
+									EbookApplication app = (EbookApplication)activity.getApplication();
+									app.getModel().setBSKomaNextContent(data);
+								} else {
+									activity.setResult(Activity.RESULT_OK, data);
+								}
+							}
+						} else {
+							// jump to content detail page at store server
+							if(mTitleId > 0) {
+								uri = Util.getBookDetailUrl(activity, mTitleId, mContentId);
+								if(uri != null)
+									finishActivity = Util.startWebActivityCheckNetworkState(activity, uri);
+							}
+//							dismiss();
+//							if(activity != null && activity instanceof MenuCallback) {
+//								((MenuCallback)activity).popViewerToState("VIEWER_MAIN");
+//							}
+						}
+
+                        if(mIsLastPage)
+                            deleteAutoBookmark(activity);
+                        
+                        if(finishActivity)
+                        	activity.finish();
+                        else
+                        	dismiss();
+					}
+					break;
+			}
+		}
+	};
+	
+	private void deleteAutoBookmark(Activity activity) {
+//        if(activity instanceof BSReader)
+//            ((BSReader)activity).deleteAutoBookmark();
+//        else if(activity instanceof BSActivity)
+//            ((BSActivity)activity).deleteAutoBookmark();
+//        else if(activity instanceof ViewerActivity)
+//            ((ViewerActivity)activity).deleteAutoBookmark();
+//        else if(activity instanceof SharpXmdfActivity)
+//            ((SharpXmdfActivity)activity).deleteAutoBookmark();
+	}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+
+        Util.initPopupDialog(getDialog());
+
+        int layoutId;
+        if (mIsSample)
+            layoutId = R.layout.dialog_next_content_sample;
+        else
+            layoutId = R.layout.dialog_next_content;
+        final View dialogLayout = inflater.inflate(layoutId, container);
+        final TextView contentName = (TextView)dialogLayout.findViewById(R.id.next_content_name);
+        final ImageView contentImage = (ImageView)dialogLayout.findViewById(R.id.next_content_image);
+        final View btnList = dialogLayout.findViewById(R.id.btn_dialog_goto_booklist);
+        final View btnStore = dialogLayout.findViewById(R.id.btn_dialog_goto_store);
+        final View btnView = dialogLayout.findViewById(R.id.dialog_btn_view);
+
+        if (contentName != null) {
+            contentName.setText(mContentName);
+            if (mTitleImage != null) {
+            	contentImage.setImageDrawable(mTitleImage);
+            }
+        }
+
+        btnList.setOnClickListener(mClickListener);
+        btnStore.setOnClickListener(mClickListener);
+        btnView.setOnClickListener(mClickListener);
+
+        return dialogLayout;
+    }
+
+	public static NextContentFragment getNextContentDialog(MenuCallback callback,
+			FragmentManager manager, ContentInfo nextContent, Bundle bundle, boolean isExist) {
+		NextContentFragment nextFragment = (NextContentFragment)manager.findFragmentByTag(Constants.FRAG_TAG_NEXT);
+		final boolean isSample = bundle.getBoolean(ExtraKeys.SAMPLE_FLG);
+		if(nextFragment == null) {
+			nextFragment = new NextContentFragment();
+			if(nextContent != null) {
+				bundle.putString(ExtraKeys.CONTENTS_NAME, nextContent.contentName);
+				bundle.putBoolean(ExtraKeys.DOWNLOADING_FLG, nextContent.isDownloaded);
+				bundle.putBoolean(ExtraKeys.DELETE_FLG, nextContent.deletedFlag);
+				bundle.putLong(ExtraKeys.DL_LIMIT_FLG, nextContent.downloadExpiredDate.getTime());
+				bundle.putBoolean(ExtraKeys.PURCHASE_FLG, true);
+				bundle.putString(ExtraKeys.CONTENTS_ID, nextContent.contentId);
+			} else {
+				
+				if(!isExist) {
+					bundle.putBoolean(ExtraKeys.NEXT_CONTENTS_NOT_EXIST, true);
+				}
+
+				if(callback instanceof Activity) {
+					final EbookApplication app = (EbookApplication)((Activity)callback).getApplicationContext();
+					String nextTitle = callback.getNextContentTitle();
+					String nextContentId = callback.getNextContentId();
+					if(!isSample) {
+						if(nextTitle != null)
+							bundle.putString(ExtraKeys.CONTENTS_NAME, nextTitle);
+						if(nextContentId != null)
+							bundle.putString(ExtraKeys.CONTENTS_ID, nextContentId);
+					} else {
+						final long titleId = bundle.getLong(TitleInfo.TITLE_ID);
+						String contentId = bundle.getString(ExtraKeys.CONTENTS_ID);
+						if(nextContentId != null && !"".equals(nextContentId)) {
+							contentId = nextContentId;
+						}
+						if(contentId != null) { 
+							final TitleInfo titleInfo = app.getModel().findTitleInfoById(titleId);
+							if(titleInfo != null) {
+								final ContentInfo contentInfo = titleInfo.findContentById(contentId);
+								if(contentInfo != null) {
+									bundle.putString(ExtraKeys.CONTENTS_NAME, contentInfo.contentName);
+									bundle.putString(ExtraKeys.CONTENTS_ID, contentInfo.contentId);
+									bundle.putBoolean(ExtraKeys.PURCHASE_FLG, true);
+									bundle.putBoolean(ExtraKeys.DELETE_FLG, contentInfo.deletedFlag);
+									bundle.putLong(ExtraKeys.DL_LIMIT_FLG, contentInfo.downloadExpiredDate.getTime());
+									bundle.putString(ExtraKeys.CONTENTS_ID, contentInfo.contentId);
+								}
+							}
+						}
+					}
+				}
+			}
+			nextFragment.setArguments(bundle);
+		}
+		return nextFragment;
+	}
+}

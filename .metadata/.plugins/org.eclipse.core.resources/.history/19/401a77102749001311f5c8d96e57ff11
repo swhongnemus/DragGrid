@@ -1,0 +1,2305 @@
+package jp.co.nttdocomo.ebook;
+ 
+import android.app.Activity;
+import android.app.Dialog;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.ContentValues;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.Resources;
+import android.content.res.TypedArray;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.Uri;
+import android.net.wifi.WifiManager;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.StatFs;
+import android.preference.PreferenceManager;
+import android.provider.Settings;
+import android.provider.Settings.SettingNotFoundException;
+import android.support.v4.app.FragmentActivity;
+import android.telephony.TelephonyManager;
+import android.util.Base64;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.view.Display;
+import android.view.Surface;
+import android.view.Window;
+import android.view.WindowManager;
+import android.widget.Toast;
+
+import com.nemustech.widget.notification.NotificationCompat;
+
+import jp.co.celsys.android.bsreader.custom.BSActivity;
+import jp.co.celsys.android.bsreaderfors.CallBs;
+import jp.co.nttdocomo.ebook.ContentInfo.DownloadTaskInfo;
+import jp.co.nttdocomo.ebook.EbookSettings.Contents;
+import jp.co.nttdocomo.ebook.EbookSettings.DownloadQueue;
+import jp.co.nttdocomo.ebook.EbookSettings.Title;
+import jp.co.nttdocomo.ebook.Encrypt.DecryptData;
+import jp.co.nttdocomo.ebook.fragments.ContentsDetailFragment;
+import jp.co.nttdocomo.ebook.fragments.common.CustomDialog;
+import jp.co.nttdocomo.ebook.server.DownloadTask.DownloadingState;
+import jp.co.nttdocomo.ebook.server.HttpCommunicationService;
+import jp.co.nttdocomo.ebook.server.ResponseErrorException;
+import jp.co.nttdocomo.ebook.server.ServerInterface;
+import jp.co.nttdocomo.ebook.server.ThumbnailDownload;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FilenameFilter;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Stack;
+
+public class Util {
+	private final static String TAG = "Util";
+
+	private static final String SCHEME_HTTP = "http";
+	private static String IMEI;
+	private static String MSN_NO;
+
+	public static void initPopupDialog(Dialog dialog) {
+		dialog.getWindow().requestFeature(Window.FEATURE_NO_TITLE);
+	    dialog.getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+	    dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+	    dialog.setCanceledOnTouchOutside(true);
+	}
+	
+	public static boolean isNetworkAvailable(Context context) {
+		final ConnectivityManager cm = 
+				(ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+		return cm.getActiveNetworkInfo() != null;
+	}
+	
+	public static boolean isMobileNetworkAvailable(Context context) {
+		ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+		NetworkInfo ni = cm.getActiveNetworkInfo();
+		if (ni == null || ConnectivityManager.TYPE_MOBILE != ni.getType()) {
+			return false;
+		} else {
+			return true;
+		}
+	}
+	
+	/**
+	 * ?�ス?�ン?�パ?�メ?�タ?�分?�し?�す??
+	 * =??��?�をkey?�、後?�をvalue?�し??��?��?
+	 * ?�行?�と?�分?�し?�す
+	 * @param response
+	 * @return
+	 */
+	public static Map<String, String> responseSplit(String response) {
+
+		Map<String, String> resultMap = new HashMap<String, String>();
+
+		if (response != null) {
+			String[] splitString = response.split("=|\\n");
+
+			int length = splitString.length;
+			if (length % 2 == 0) {
+				for (int i = 0; i < length; i += 2) {
+					resultMap.put(splitString[i].trim(), splitString[i + 1].trim());
+				}
+			}
+		}
+		return resultMap;
+	}
+	
+	public static void startWebActivity(Context context, Uri uri) {
+		Intent intent = new Intent(Intent.ACTION_VIEW);
+		intent.setData(uri);
+		context.startActivity(intent);
+	}
+	
+	public static boolean startWebActivityCheckNetworkState(Activity activity, Uri uri) {
+		final ConnectivityManager conn =  (ConnectivityManager)
+				activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+		final NetworkInfo networkInfo = conn.getActiveNetworkInfo();
+		boolean isNetworkFailed = false;
+		if(networkInfo != null) {
+			final boolean isAvailable = networkInfo.isAvailable();
+			final boolean isConnected = networkInfo.isConnected();
+			if(!(isAvailable && isConnected)) {
+				isNetworkFailed = true;
+			}
+		} else {
+			isNetworkFailed = true;
+		}
+		
+		if(isNetworkFailed) {
+			final CustomDialog errorDialog = Util.createErrorDialog(activity, Constants.ERROR_CODE_NETWORK_FAIL, null, -1, false);
+			errorDialog.show(((FragmentActivity)activity).getSupportFragmentManager(), Constants.FRAG_TAG_ERROR);
+			return false;
+		}
+		
+		Intent intent = new Intent(Intent.ACTION_VIEW);
+		intent.setData(uri);
+		activity.startActivity(intent);
+		
+		return true;
+	}
+	
+	// store top page
+	public static Uri getStoreTopUrl(Context context) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				? context.getResources().getString(R.string.authority_debug)
+						: context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.top_path));
+		uri = appendTakeOverData(context, uri);
+		uri = appendGoogleAnalytics(context, uri);
+		return uri.build();
+	}
+
+	// detail info. what content id should be used?
+	public static Uri getBookDetailUrl(Context context, Long titleId, String contentsId) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.detail));
+		DecimalFormat format = new DecimalFormat("0000000000");
+		HashMap<String, String> params = new HashMap<String, String>();
+		params.put("title_id", format.format(titleId));
+		params.put("item_id", contentsId);
+		uri = appendItemIds(uri, params);
+		uri = appendTakeOverData(context, uri);
+		uri = appendGoogleAnalytics(context, uri);
+		return uri.build();
+	}
+
+	// buy book. what content id should be used?
+	public static Uri getBookPurchaseUrl(Context context, Long titleId, String contentsId) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.purchase));
+		DecimalFormat format = new DecimalFormat("0000000000");
+		HashMap<String, String> params = new HashMap<String, String>();
+		params.put(TitleInfo.TITLE_ID, format.format(titleId));
+		params.put("item_ids", contentsId);
+		uri = appendItemIds(uri, params);
+		uri = appendTakeOverData(context, uri);
+		uri = appendGoogleAnalytics(context, uri);
+		return uri.build();
+	}
+
+	// buy book. what content id should be used?
+	public static Uri getBookDownloadUrl(Context context, Long titleId, String contentsId) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.api_download_contents));
+		DecimalFormat format = new DecimalFormat("0000000000");
+		HashMap<String, String> params = new HashMap<String, String>();
+		params.put(TitleInfo.TITLE_ID, format.format(titleId));
+		params.put("item_ids", contentsId);
+		uri = appendItemIds(uri, params);
+		uri = appendTakeOverData(context, uri);
+		uri = appendGoogleAnalytics(context, uri);
+		return uri.build();
+	}
+
+	// help - how to use this app
+	public static Uri getTipsAndTricksUrl(Context context) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.tips_and_tricks));
+		uri = appendTakeOverData(context, uri);
+		return appendGoogleAnalyticsForTipsAndTricks(context, uri).build();
+	}
+
+	// supported device list - external memory exceptions
+	public static Uri getSupportedDeviceUrl(Context context) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.device_list));
+		uri = appendTakeOverData(context, uri);
+		return appendGoogleAnalytics(context, uri).build();
+	}
+
+	// for new comer
+	public static Uri getNewComerUrl(Context context) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.information_newcommer));
+		uri = appendTakeOverData(context, uri);
+		uri = appendGoogleAnalytics(context, uri);
+		return uri.build();
+	}
+	
+	// for IMEI FAQ
+	public static Uri getImeiFaqUrl(Context context) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		
+		//URL has fragment "faq#faq00005"
+		
+		uri.path("faq");
+		uri = appendTakeOverData(context, uri);
+		uri = appendGoogleAnalytics(context, uri);
+		uri.fragment("faq00005");
+		
+		return uri.build();
+	}
+
+	/**
+	 * URL?�パ?�メ?�タ?�追?�し?�す
+	 * @param uri
+	 * @param params
+	 * @return
+	 */
+	private static Uri.Builder appendItemIds(Uri.Builder uri, HashMap<String, String> params) {
+		Iterator<Entry<String, String>> ite  = params.entrySet().iterator();
+		while (ite.hasNext()) {
+			 Entry<String, String> item = ite.next();
+			 uri.appendPath(item.getKey());
+			 uri.appendPath(item.getValue());
+		}
+		return uri;
+	}
+
+	/**
+	 * 認証?�報引き継ぎ
+	 */
+	public static Uri.Builder appendTakeOverData(Context context, Uri.Builder uri) {
+		int seed = (int)(java.lang.Math.random() * 1000);
+		int type = (int)(java.lang.Math.random() * 1000);
+		uri.appendQueryParameter("seed", String.valueOf(seed));
+		uri.appendQueryParameter("type", String.valueOf(type));
+
+	    DecryptData decryptData = new DecryptData();
+	    decryptData.setSessionId(Encrypt.decodeTripleDES(context, EbookPreferences.getString(EbookPreferences.SESSION_ID, "")));
+	    decryptData.setUserNo(Encrypt.decodeTripleDES(context, EbookPreferences.getString(EbookPreferences.USER_ID, "")));
+	    uri.appendQueryParameter("data", Encrypt.getEncrypt(decryptData, type, seed));
+		uri.appendQueryParameter("docomoIdFlg", EbookPreferences.getString(EbookPreferences.DOCOMO_ID_FLAG, ""));
+
+		return uri;
+
+	}
+	
+	private static Uri.Builder appendGoogleAnalytics(Context context, Uri.Builder uri) {
+		uri.appendQueryParameter("utm_source", context.getString(R.string.utm_source));
+		uri.appendQueryParameter("utm_medium", context.getString(R.string.utm_medium));
+		uri.appendQueryParameter("utm_campaign", context.getString(R.string.utm_campaign));
+		return uri;
+	}
+
+	private static Uri.Builder appendGoogleAnalyticsForTipsAndTricks(Context context, Uri.Builder uri) {
+		uri.appendQueryParameter("utm_source", context.getString(R.string.utm_source2));
+		uri.appendQueryParameter("utm_medium", context.getString(R.string.utm_medium));
+		uri.appendQueryParameter("utm_campaign", context.getString(R.string.utm_campaign));
+		return uri;
+	}
+
+	public static Boolean isExistsTitleImage(Context con, Long title_id, String contents_id) {
+		String saveDir = getInsideThumbnailPath(con);
+		File file = null;
+		if(contents_id != null && !contents_id.equals("")) {
+			file = new File(saveDir + String.valueOf(title_id) + "_" + contents_id + ThumbnailDownload.BOOKLIST_API_THUMBNAIL_EXTENTION);
+		} else {
+			file = new File(saveDir + String.valueOf(title_id) + ThumbnailDownload.BOOKLIST_API_THUMBNAIL_EXTENTION);
+		}
+
+		if(file.exists() && file.canRead()) {
+			return true;
+		}
+		return false;
+	}
+
+	public static String getTitleId(Long title_id) {
+		DecimalFormat format = new DecimalFormat("0000000000");
+		return format.format(title_id);
+	}
+	
+	public static String getInSideSavePath(Context context) {
+		return context.getFilesDir() + File.separator;
+	}
+
+	public static String getInsideThumbnailPath(Context context) {
+		return Util.getInSideSavePath(context) + "files" + File.separator + "thumbnail" + File.separator;
+	}
+	
+	public static boolean checkSimState(Context context) {
+		if(Debug.DEBUG)
+			return true;
+		
+		TelephonyManager telManager = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+		int state = telManager.getSimState();
+
+		if (state == TelephonyManager.SIM_STATE_READY
+				&& getMsnNo(context) != null) { //telManager.getSimSerialNumber() != null) {	// 使用??��
+			return true;
+		} else if (state == TelephonyManager.SIM_STATE_UNKNOWN) { // SIM不明
+			return false;
+		} else {
+			return false;
+		}
+	}
+	
+	public static boolean isAirPlaneMode(Context context) {
+		if(Debug.DEBUG)
+			return false;
+		
+		int air = android.provider.Settings.System.getInt(
+				context.getContentResolver(),
+				android.provider.Settings.System.AIRPLANE_MODE_ON, 0);
+		if (air == 1) {
+			return true;
+		}
+		return false;
+	}
+	
+	public static Bitmap getTitleImage(Context context, Long titleId, String contentsId) {
+		EbookApplication application = (EbookApplication)context.getApplicationContext();
+		String saveDir = getInsideThumbnailPath(context);
+		File file = null;
+		if(contentsId != null && contentsId.length() > 0) {
+			file = new File(saveDir + String.valueOf(titleId) + "_" + contentsId + ThumbnailDownload.BOOKLIST_API_THUMBNAIL_EXTENTION);
+		} else {
+			file = new File(saveDir + String.valueOf(titleId) + ThumbnailDownload.BOOKLIST_API_THUMBNAIL_EXTENTION);
+		}
+		
+		Bitmap titleImage = null;
+
+		if(file.exists() && file.canRead()) {
+			BitmapFactory.Options opt = new BitmapFactory.Options();
+			//opt.inPurgeable = true;
+			
+			titleImage = application.getImageCache().getTitleImage(file, opt);
+		}
+		
+		if(titleImage == null) {
+			titleImage = application.getImageCache().getDefaultTitleImage(context); 
+		}
+		
+		return titleImage;
+	}
+
+	public static Bitmap getTitleImageLazyLoad(Context context, Long titleId, String contentId, int itemIndex) {
+		EbookApplication application = (EbookApplication)context.getApplicationContext();
+		String saveDir = getInsideThumbnailPath(context);
+		File file = null;
+		if(contentId != null && contentId.length() > 0) {
+			file = new File(saveDir + String.valueOf(titleId) + "_" + contentId + ThumbnailDownload.BOOKLIST_API_THUMBNAIL_EXTENTION);
+		} else {
+			file = new File(saveDir + String.valueOf(titleId) + ThumbnailDownload.BOOKLIST_API_THUMBNAIL_EXTENTION);
+		}
+		
+		Bitmap titleImage = null;
+		if(file.exists() && file.canRead()) {
+			BitmapFactory.Options opt = new BitmapFactory.Options();
+			opt.inPurgeable = true;
+
+			titleImage = application.getImageCache().getTitleImage(file, opt);
+		}
+		
+		if(titleImage == null) {
+			titleImage = application.getImageCache().getDefaultTitleImage(context); 
+		}
+		
+		return titleImage;
+	}
+	
+	public static boolean removeContents(Context context, ContentInfo contentInfo, String path) {
+		contentInfo.isDownloaded = false;
+		
+		final ContentValues isUpdatedValues = new ContentValues();
+		isUpdatedValues.put(Contents.IS_DOWNLOADED, contentInfo.isDownloaded);
+		EbookModel.updateToDatabase(context, Contents.CONTENT_URI, contentInfo.id, isUpdatedValues);
+		
+		return removeFile(path);
+	}
+	
+	public static boolean removeFile(String path) {
+		final File target = new File(path);
+		if (target == null || !target.exists())
+			return false;
+		
+		File[] currList;
+		Stack<File> stack = new Stack<File>();
+		stack.push(target);
+		while (!stack.isEmpty()) {
+			final File lastFile = stack.lastElement();
+		    if (lastFile.isDirectory()) {
+		        currList = lastFile.listFiles();
+		        if (currList.length > 0) {
+		            for (File curr: currList)
+		                stack.push(curr);
+		        } else {
+		            stack.pop().delete();
+		        }
+		    } else {
+		    	stack.pop().delete();
+		    }
+		}
+		return true;
+	}
+
+	public static void startViewer(Activity activity, ContentInfo contentInfo) {
+		startViewer(activity, contentInfo, null);
+	}
+
+	public static void startViewer(Activity activity, ContentInfo contentInfo, Uri data) {
+		Intent intent = getContentViewerIntent(activity, contentInfo, data);
+		if(intent != null) {
+			activity.startActivityForResult(intent, Constants.REQUEST_START_VIEWER);
+			
+			if(!contentInfo.isSample)
+				Util.updateRecentReadContent(activity, contentInfo);
+		}
+	}
+
+	public static void startViewer(Activity activity, Intent intent) {
+		if(intent != null) {
+			activity.startActivityForResult(intent, Constants.REQUEST_START_VIEWER);
+		}
+	}
+
+	public static Intent getNextContentIntentForViewer(Activity activity, ContentInfo contentInfo) {
+		return getNextContentIntentForViewer(activity, contentInfo, null);
+	}
+
+	public static Intent getNextContentIntentForViewer(Activity activity, ContentInfo contentInfo, Uri data) {
+		Intent intent = getContentViewerIntent(activity, contentInfo, data);
+		if(intent != null && !contentInfo.isSample) {
+			Util.updateRecentReadContent(activity, contentInfo);
+		}
+		return intent;
+	}
+
+	private static void updateRecentReadContent(Activity activity, ContentInfo contentInfo) {
+	    if (!contentInfo.isSample) {
+	        Util.setRecentlyReadContentId(activity, contentInfo);
+	    }
+        if (!contentInfo.isRead) {
+            contentInfo.isRead = true;
+            ContentValues values = new ContentValues();
+            values.put(Contents.IS_READ, true);
+            EbookModel.updateToDatabase(activity, Contents.CONTENT_URI, contentInfo.id, values);
+        }
+	}
+
+	private static Intent getContentViewerIntent(Context context, ContentInfo contentInfo, Uri data) {
+		final EbookApplication app = (EbookApplication)context.getApplicationContext();
+		final TitleInfo selectedTitleInfo = app.getModel().findTitleInfoById(contentInfo.titleId);
+		String titleName;
+		long bookType = -1L;
+		long format = -1L;
+
+		if(contentInfo.isSample) {
+			bookType = (long)contentInfo.contentsType;
+			titleName = contentInfo.contentName;
+		} else {
+			bookType = selectedTitleInfo.bookType;
+			titleName = selectedTitleInfo.titleName + " - ";
+			titleName += contentInfo.contentName;
+		}
+
+		if((int)contentInfo.contentFormat == Constants.CONTENTS_BOOK_FORMAT_HBC) {
+			bookType = Constants.CONTENTS_BOOK_TYPE_COMIC;
+		}
+
+		android.util.Log.e(TAG, "[RIG] titleName : " + titleName);
+		android.util.Log.e(TAG, "[RIG] bookType : " + bookType);
+//		android.util.Log.e(TAG, "[RIG] contentInfo.contentFormat : " + contentInfo.contentFormat);
+//		android.util.Log.e(TAG, "[RIG] contentInfo.contentName : " + contentInfo.contentName);
+//		android.util.Log.e(TAG, "[RIG] contentInfo.fileName : " + contentInfo.fileName);
+//		android.util.Log.e(TAG, "[RIG] contentInfo.downloadFormat : " + contentInfo.downloadFormat);
+
+//		int index = (contentInfo.fileName == null ? -1 : contentInfo.fileName.lastIndexOf("."));
+//		if(index < 0)
+//		    format = getBookFormatId("");
+//		else
+//		    format = getBookFormatId(contentInfo.fileName.substring(index));
+//		
+//        if(format == Constants.CONTENTS_BOOK_FORMAT_EPUB && contentInfo.contentFormat == Constants.CONTENTS_BOOK_FORMAT_EPUB30)
+//            format = Constants.CONTENTS_BOOK_FORMAT_EPUB30;
+		
+		if(contentInfo.downloadFormat == Constants.CONTENTS_BOOK_FORMAT_EPUB
+		        && contentInfo.contentFormat == Constants.CONTENTS_BOOK_FORMAT_EPUB30)
+		    format = Constants.CONTENTS_BOOK_FORMAT_EPUB30;
+		else
+		    format = contentInfo.contentFormat;
+
+		Intent intent = new Intent();
+		intent.putExtra(TitleInfo.TITLE_ID, contentInfo.titleId);
+		intent.putExtra(ExtraKeys.CONTENTS_ID, contentInfo.contentId);
+		intent.putExtra(ExtraKeys.CONTENTS_NAME, titleName);
+		intent.putExtra(ExtraKeys.SAMPLE_FLG, contentInfo.isSample);
+		intent.putExtra(ExtraKeys.BOOK_FILE_NAME, contentInfo.fileName);
+		intent.putExtra(ExtraKeys.BOOK_TYPE, bookType);
+		intent.putExtra(ExtraKeys.CONTENTS_FORMAT, (int)format);
+		intent.putExtra(ExtraKeys.CONTENTS_DOWNLOAD_POSITION, contentInfo.downloadedPosition);
+		intent.putExtra("UserID", Encrypt.decodeTripleDES(context, EbookPreferences.getString(EbookPreferences.USER_ID, null)));
+		if(data == null)
+			intent.setData(Uri.parse(getDownloadedFolder(context, contentInfo.downloadedPosition) + File.separator + contentInfo.fileName));
+			//intent.setData(Uri.parse(getFilePath(context, contentInfo.contentId, bookType)));
+		else
+			intent.setData(data);
+
+//		android.util.Log.e(TAG, "[RIG] titleName : " + (selectedTitleInfo == null ? "null" : selectedTitleInfo.titleName));
+//		android.util.Log.e(TAG, "[RIG] contentFormat : " + contentInfo.contentFormat);
+//		android.util.Log.e(TAG, "[RIG] bookType : " + bookType);
+
+		switch((int)contentInfo.contentFormat) {
+			case Constants.CONTENTS_BOOK_FORMAT_EPUB:
+			case Constants.CONTENTS_BOOK_FORMAT_EPUB30:
+			case Constants.CONTENTS_BOOK_FORMAT_DOTBOOK:
+			case Constants.CONTENTS_BOOK_FORMAT_HBC:
+//			case Constants.CONTENTS_BOOK_FORMAT_XMDF:
+				intent.setClass(context, ViewerActivity.class);
+				break;
+
+			case Constants.CONTENTS_BOOK_FORMAT_BS:
+				intent.setClass(context, CallBs.class);
+//				intent.setFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
+				intent.setAction(Intent.ACTION_VIEW);
+				break;
+
+			case Constants.CONTENTS_BOOK_FORMAT_BS_HYBRID:
+				intent.setClass(context, BSActivity.class);
+				break;
+			case Constants.CONTENTS_BOOK_FORMAT_XMDF:
+				intent.setClass(context, SharpXmdfActivity.class);
+				break;
+			case Constants.CONTENTS_BOOK_FORMAT_NONE:
+				
+			default:
+				break;
+		}
+		return intent;
+	}
+
+	public static void initRecentlyReadContentId(Context context) {
+		EbookPreferences.putString(EbookPreferences.KEY_RECENTLY_READ_CONTENT, "");
+	}
+
+	public static void setRecentlyReadContentId(Context context, ContentInfo contentInfo) {
+		if(contentInfo == null)
+			return;
+
+		EbookPreferences.putString(EbookPreferences.KEY_RECENTLY_READ_CONTENT, contentInfo.contentId);
+	}
+	
+	public static String getRecentlyReadContentId(Context context) {
+		return EbookPreferences.getString(EbookPreferences.KEY_RECENTLY_READ_CONTENT, null);
+	}
+		
+	public static int getSortType(Context context) {
+		int index = EbookPreferences.getInt(EbookPreferences.SORT_TYPE, 0);
+		TypedArray sortTypes = context.getResources().obtainTypedArray(R.array.bookshlef_sort_types);
+		int retId = sortTypes.getResourceId(index, R.string.sort_date);
+		sortTypes.recycle();
+		return retId;
+	}
+	
+	public static void setSortType(Context context, int id) {
+		TypedArray sortTypes = context.getResources().obtainTypedArray(R.array.bookshlef_sort_types);
+		for(int i = 0; i < sortTypes.length(); i++) {
+			if(sortTypes.getResourceId(i, R.string.sort_date) == id) {
+				EbookPreferences.putInt(EbookPreferences.SORT_TYPE, i);
+				sortTypes.recycle();
+				return;
+			}
+		}
+	}
+	
+	public static boolean checkDataState(Context context) {
+		TelephonyManager telManager = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+
+		int state = telManager.getDataState();
+		boolean result = false;
+
+		if (state == TelephonyManager.DATA_CONNECTED) {	// ?�続�?
+			result = true;
+		} else if (state == TelephonyManager.DATA_CONNECTING) { // ?�続�?
+			result = true;
+		} else if (state == TelephonyManager.DATA_DISCONNECTED) { // ?�接�?
+			result = false;
+		} else if (state == TelephonyManager.DATA_SUSPENDED) { // 一?�中??
+			result = false;
+		} else {
+			result = false;
+		}
+
+		if (!result) {
+			WifiManager wifiManager = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+
+			if (wifiManager.getWifiState() == WifiManager.WIFI_STATE_ENABLED) {
+				result = true;
+			}
+
+		}
+		return result;
+	}
+	
+	public static Map<Long, List<String>> parseAndUpdateBookList(Context context, JSONArray jsonArray) {
+		final EbookModel model = ((EbookApplication)context.getApplicationContext()).getModel();
+		final SimpleDateFormat dateParser = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+//        boolean needUpdateMain = false;
+		
+		int length = jsonArray.length();
+		Map<Long, List<String>> parsedResult = new HashMap<Long, List<String>>();
+		
+		List<TitleInfo> listToAdd = model.getAllTitlesList();
+		if(listToAdd == null)
+			listToAdd = new ArrayList<TitleInfo>();
+
+		//Title loop
+		for (int i = 0; i < length; i++) {
+			JSONObject titleData;
+			try {
+				final List<String> contentIds = new ArrayList<String>();
+				titleData = jsonArray.getJSONObject(i);
+				
+				TitleInfo titleInfo = TitleInfo.fromJSON(titleData, dateParser);
+				if(titleInfo != null) {
+					final long titleId = titleInfo.titleId;
+					TitleInfo foundTitle = model.findTitleInfoById(titleId);
+
+					if(foundTitle == null) { // insert not found
+					    foundTitle = titleInfo;
+						listToAdd.add(foundTitle);
+						EbookModel.addToDatabase(context, Title.CONTENT_URI, foundTitle);
+					} else {
+						// Update
+						foundTitle.updateParsedValues(titleInfo);
+						ContentValues updateValues = new ContentValues();
+						foundTitle.onAddToDatabase(updateValues);
+						EbookModel.updateToDatabase(context, Title.CONTENT_URI, foundTitle.id, updateValues);
+					}
+					model.addToNotPurchasedInfo(foundTitle);
+
+					JSONArray contentsDetail = titleData.getJSONArray(TitleInfo.CONTENTS_INFO);
+					final int contentsLength = contentsDetail.length();
+					//Contents loop
+					for (int j = 0; j < contentsLength; j++) {
+						JSONObject contentData = (JSONObject) contentsDetail.get(j);
+						ContentInfo contentInfo = ContentInfo.fromJSON(
+								contentData, 
+								dateParser, 
+								foundTitle.titleId, 
+								Contents.TYPE_CONTENTS_NORMAL);
+						if(foundTitle != null && contentInfo != null) {
+							final ContentInfo foundContent = model.findContentInfoById(titleId, contentInfo.contentId);
+							if(foundContent == null) {
+							    foundTitle.addContents(contentInfo);
+								EbookModel.addToDatabase(context, Contents.CONTENT_URI, contentInfo);
+							} else {
+								foundContent.updateParsedValues(contentInfo);
+								ContentValues updateValues = new ContentValues();
+								foundContent.onAddToDatabase(updateValues);
+								EbookModel.updateToDatabase(context, Contents.CONTENT_URI, foundContent.id, updateValues);
+							}
+						}
+						if(contentInfo != null)
+							contentIds.add(contentInfo.contentId);
+					}
+					parsedResult.put(titleId, contentIds);
+					//model.checkNewItemInfoExist(foundTitle);
+//					if(model.checkNewItemInfoExist(foundTitle))
+//					    needUpdateMain = true;
+				}
+			} catch (JSONException e) {
+				e.printStackTrace();
+			} finally {
+				if(!EbookProvider.dbInitailized)
+					EbookProvider.dbInitailized = true;
+			}
+		}
+
+		model.setAllTitlesList(listToAdd);
+//		if(needUpdateMain)
+//		    model.notifyNewOrNext();
+
+		return parsedResult;
+	}
+	
+	public static void getImageThumbnail(Context context, EbookModel model, List<TitleInfo> titleInfos) {
+		JSONArray jsroot = new JSONArray();
+		try {
+			final int count = titleInfos.size();
+			for (int i = 0; i < count; i++) {
+				final TitleInfo info = titleInfos.get(i);
+				if (!Util.isExistsTitleImage(context, info.titleId, null)) {
+					JSONObject jsobj = new JSONObject();
+					jsobj.put("title_id", Util.getTitleId(info.titleId));
+					jsobj.put("item_id", "");
+					jsroot.put(jsobj);
+				}
+				
+				List<ContentInfo> contents = info.getAllContents();
+				if(contents != null) {
+					for(ContentInfo contentInfo : contents) {
+						if (!Util.isExistsTitleImage(context, info.titleId, contentInfo.contentId)) {
+							JSONObject jsobj = new JSONObject();
+							jsobj.put(TitleInfo.TITLE_ID, Util.getTitleId(info.titleId));
+							jsobj.put(ContentInfo.CONTENTS_ID, contentInfo.contentId);
+							jsroot.put(jsobj);
+						}
+					}
+				}
+				info.setTitleThumbnailImage(Util.getTitleImage(context, info.titleId, null));
+			}
+
+			int i, len = jsroot.length();
+			JSONArray sendAry = new JSONArray();
+			for(i = 0; i < len; i++) {
+				sendAry.put(jsroot.get(i));
+				if(sendAry.length() == 10 || i == len - 1) {
+					Map<String, String> request = new HashMap<String, String>();
+					request.put(ThumbnailDownload.BOOK_THUMBNAIL_DOWNLOADER_DATA, sendAry.toString());
+
+					ThumbnailDownload thumbnailDownload = new ThumbnailDownload(context);
+					thumbnailDownload.setRequest(request);
+					thumbnailDownload.setRequestType(ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_BOOK_COVER);
+					thumbnailDownload.setCallback(model);
+					EbookModel.runOnBackgroundThread(thumbnailDownload);
+					sendAry = new JSONArray();
+				}
+			}
+		} catch (JSONException e) {
+			e.getStackTrace();
+		}
+	}
+
+	public static void updateBookDownloadState(Context context, EbookModel model, boolean isSearchInternal, boolean ignoreError) {
+		//search internal memory when user change and db clear
+		if(isSearchInternal) {
+//			searchFolderFile(context, model, true);
+		}
+		//search external everytime	
+        searchFolderFile(context, model, true);
+		searchFolderFile(context, model, false);
+
+		model.downloadStatusFinished(ignoreError);
+	}
+	
+	public static void searchFolderFile(final Context context, final EbookModel model, final boolean isInternal) {
+//		EbookModel.runOnBackgroundThread(new Runnable() {
+//			@Override
+//			public void run() {
+				String path;
+                String subPath;
+				String oldPath;
+				String veryOldPath;
+				int position;
+                int oldPosition;
+                int veryOldPosition;
+				if(isInternal) {
+					position = Contents.TYPE_DL_POSITION_INTERNAL;
+					oldPosition = Contents.TYPE_DL_POSITION_OLD_INTERNAL;
+					veryOldPosition = Contents.TYPE_DL_POSITION_VERY_OLD_INTERNAL;
+					path = getInSideUserSavePath(context);
+					subPath = getInSideUserSavePath(context) + File.separator + Constants.OLD_SUBFOLDER;
+					oldPath = getOldInSideUserSavePath(context);
+					veryOldPath = getVeryOldInSideUserSavePath(context);
+				}
+				else {
+					position = Contents.TYPE_DL_POSITION_EXTERNAL;
+					oldPosition = Contents.TYPE_DL_POSITION_OLD_EXTERNAL;
+					veryOldPosition = Contents.TYPE_DL_POSITION_VERY_OLD_EXTERNAL;
+					path = getOutSideUserSavePath(context);
+                    subPath = getOutSideUserSavePath(context) + File.separator + Constants.OLD_SUBFOLDER;
+					oldPath = getOldOutSideUserSavePath(context);
+					veryOldPath = getVeryOldOutSideUserSavePath(context);
+				}
+				List<TitleInfo> titleList = model.getAllTitlesList();
+                
+                if(oldPath != null) {
+                    //move old user directory to new user sub directory 
+                    moveOldFileToSubFolder(context, oldPath, subPath);
+                }
+                
+				if(veryOldPath != null) {
+	                File veryOldFolder = new File(veryOldPath);
+	                if(veryOldFolder != null && veryOldFolder.isDirectory()) {
+	                    String[] fileList = veryOldFolder.list();
+	                    int i, len = fileList.length;
+	                    for(i = 0; i < len; i++) {
+	                        String file = fileList[i];
+	                        if(!file.endsWith(Constants.FILE_EXT))
+	                            continue;
+	                        outerLoop:
+	                        for(TitleInfo title : titleList) {
+	                            List<ContentInfo> contentList = title.getAllContents();
+	                            for(ContentInfo content : contentList) {
+	                                if(file.startsWith(content.contentId) && content.contentsType == Contents.TYPE_CONTENTS_NORMAL) {
+	                                    if(content.contentFormat == Constants.CONTENTS_BOOK_FORMAT_XMDF) {
+	                                        if(convertBookmarkFile(context, content.contentId) < 0)
+	                                            Toast.makeText(context, "bookmark convert err..", Toast.LENGTH_SHORT).show();;
+	                                    }
+	                                    content.isDownloaded = true;
+	                                    content.downloadedPosition = veryOldPosition;
+	                                    content.fileVersion = Contents.TYPE_BEFORE_18;
+	                                    ContentValues isUpdatedValues = new ContentValues();
+	                                    isUpdatedValues.put(Contents.IS_DOWNLOADED, 1);
+	                                    isUpdatedValues.put(Contents.DL_POSITION, veryOldPosition);
+	                                    isUpdatedValues.put(Contents.FILE_VERSION, Contents.TYPE_BEFORE_18);
+	                                    EbookModel.updateToDatabase(context, Contents.CONTENT_URI, content.id, isUpdatedValues);
+	                                    break outerLoop;
+	                                }
+	                            }
+	                        }
+	                    }
+	                }
+				}
+				
+				if(subPath != null) {
+				    File oldFolder = new File(subPath);
+	                if(oldFolder != null && oldFolder.isDirectory()) {
+	                    String[] fileList = oldFolder.list();
+	                    int i, len = fileList.length;
+	                    for(i = 0; i < len; i++) {
+	                        String file = fileList[i];
+	                        if(!file.endsWith(Constants.FILE_EXT))
+	                            continue;
+                            outerLoop:
+	                        for(TitleInfo title : titleList) {
+	                            List<ContentInfo> contentList = title.getAllContents();
+	                            for(ContentInfo content : contentList) {
+	                                if(file.startsWith(content.contentId) && content.contentsType == Contents.TYPE_CONTENTS_NORMAL) {
+	                                    if(content.contentFormat == Constants.CONTENTS_BOOK_FORMAT_XMDF) {
+	                                        if(convertBookmarkFile(context, content.contentId) < 0)
+	                                            Toast.makeText(context, "bookmark convert err..", Toast.LENGTH_SHORT).show();;
+	                                    }
+	                                    content.isDownloaded = true;
+	                                    content.downloadedPosition = oldPosition;
+	                                    content.fileVersion = Contents.TYPE_BEFORE_18;
+	                                    ContentValues isUpdatedValues = new ContentValues();
+	                                    isUpdatedValues.put(Contents.IS_DOWNLOADED, 1);
+	                                    isUpdatedValues.put(Contents.DL_POSITION, oldPosition);
+	                                    isUpdatedValues.put(Contents.FILE_VERSION, Contents.TYPE_BEFORE_18);
+	                                    EbookModel.updateToDatabase(context, Contents.CONTENT_URI, content.id, isUpdatedValues);
+	                                    break outerLoop;
+	                                }
+	                            }
+	                        }
+	                    }
+	                }
+				}
+
+                File folder = new File(path);
+                if(folder != null && folder.isDirectory()) {
+                    String[] fileList = folder.list();
+                    int i, len = fileList.length;
+                    for(i = 0; i < len; i++) {
+                        String file = fileList[i];
+                        if(!file.endsWith(Constants.FILE_EXT))
+                            continue;
+                        outerLoop:
+                        for(TitleInfo title : titleList) {
+                            List<ContentInfo> contentList = title.getAllContents();
+                            for(ContentInfo content : contentList) {
+                                if(file.startsWith(content.contentId) && content.contentsType == Contents.TYPE_CONTENTS_NORMAL) {
+                                    content.isDownloaded = true;
+                                    content.downloadedPosition = position;
+                                    content.fileVersion = Contents.TYPE_AFTER_18;
+                                    ContentValues isUpdatedValues = new ContentValues();
+                                    isUpdatedValues.put(Contents.IS_DOWNLOADED, 1);
+                                    isUpdatedValues.put(Contents.DL_POSITION, position);
+                                    isUpdatedValues.put(Contents.FILE_VERSION, Contents.TYPE_AFTER_18);
+                                    EbookModel.updateToDatabase(context, Contents.CONTENT_URI, content.id, isUpdatedValues);
+                                    break outerLoop;
+                                }
+                            }
+                        }
+                    }
+                }
+//			}
+//		});
+	}
+	
+//	private static boolean checkBookmarkFile(String ext) {
+//	    Map<String, Integer> bookmarkExt = new HashMap<String, Integer>();
+//        bookmarkExt.put(".bkm", 1);
+//        bookmarkExt.put(".rdi", 1);
+//        bookmarkExt.put(".ebkm", 1);
+//        bookmarkExt.put(".ecop", 1);
+//        bookmarkExt.put(".bkm", 1);
+//        if(bookmarkExt.containsKey(ext))
+//            return true;
+//        else
+//            return false;
+//	}
+//    
+//    private static boolean checkXmdfBookmarkFile(String ext) {
+//        Map<String, Integer> bookmarkExt = new HashMap<String, Integer>();
+//        bookmarkExt.put(".cop", 1);
+//        bookmarkExt.put(".udt", 1);
+//        if(bookmarkExt.containsKey(ext))
+//            return true;
+//        else
+//            return false;
+//    }
+    
+    private static int moveOldFileToSubFolder(final Context context, String oldFolderPath, String newFolderPath) {
+        File newFolder = new File(newFolderPath);
+        File oldFolder = new File(oldFolderPath);
+        
+        try {
+            if(!newFolder.exists()) {
+                oldFolder.renameTo(newFolder);
+                return 0;
+            }
+            
+            if(newFolder.exists() && !newFolder.isDirectory()) {
+                newFolder.delete();
+                newFolder.mkdir();
+            }
+            else if(!newFolder.exists()) {
+                newFolder.mkdir();
+            }
+
+            if(oldFolder.isDirectory()) {
+                String[] fileList = oldFolder.list();
+                int i, len = fileList.length;
+                for(i = 0; i < len; i++) {
+                    String file = fileList[i];
+//                    if(checkBookmarkFile(file.substring(file.lastIndexOf("."))))
+//                        continue;
+//                    if(checkXmdfBookmarkFile(file.substring(file.lastIndexOf(".")))) {
+//                        File delFile = new File(oldFolderPath + File.separator + file);
+//                        if(delFile != null && delFile.exists())
+//                            delFile.delete();
+//                        continue;
+//                    }
+                    File oldFile = new File(oldFolderPath + File.separator + file);
+                    File newFile = new File(newFolderPath + File.separator + file);
+                    if(newFile != null && newFile.exists())
+                        oldFile.delete();
+                    else if(oldFile != null)
+                        oldFile.renameTo(newFile);
+                }
+            }
+            if(oldFolder.list().length == 0)
+                oldFolder.delete();
+        }
+        catch(Exception e) {
+            e.printStackTrace();
+            return 1;
+        }
+        return 0;
+    }
+	
+//	private static int convertOldFile(final Context context, String oldFileName, String newFileName, int version) {
+//		int bufSize = 8192;
+//		File newFile = new File(newFileName);
+//		File oldFile = new File(oldFileName);
+//		try {
+//			InputStream is = new FileInputStream(oldFile);
+//			BufferedInputStream in = new BufferedInputStream(is);
+//
+//			byte oldUidBuf[] = new byte[32];
+//			byte newUidBuf[];
+//			byte tempBuf[] = new byte[2];
+//			byte buf[] = new byte[bufSize];
+//			int size = -1;
+//			
+//			//read first 32byte suid token
+//			in.read(oldUidBuf, 0, 32);
+//			if(version < 15) {
+//				String uid = ParentConverter.createOldToken(Encrypt.decodeTripleDES(context,
+//                        EbookPreferences.getString(EbookPreferences.USER_ID, null)));
+//				byte[] uidBuf = uid.getBytes();
+//				if(!Arrays.equals(uidBuf, oldUidBuf)) {
+//					in.close();
+//					return 1;
+//				}
+//			}
+//			if(newFile.exists()) {
+//				newFile.delete();
+//				newFile.createNewFile();
+//			}
+//			OutputStream os = new FileOutputStream(newFile);
+//			BufferedOutputStream out = new BufferedOutputStream(os);
+//			
+//			//write new 64byte suid token
+//			String uid = ParentConverter.createToken(Encrypt.decodeTripleDES(context,
+//                            EbookPreferences.getString(EbookPreferences.USER_ID, null)));
+//			newUidBuf = uid.getBytes();
+//			out.write(newUidBuf);
+//			out.flush();
+//			
+//			//remove 32byte msn token
+//			for(int i = 0; i < 16; i++) {
+//				in.read(tempBuf, 0, 2);
+//				in.read(tempBuf, 0, 2);
+//				out.write(tempBuf);
+//				out.flush();
+//			}
+//			
+//			//read remain file
+//			while ((size = in.read(buf)) != -1) {
+//				out.write(buf, 0, size);
+//				out.flush();
+//			}
+//			
+//			if (in != null) {
+//				in.close();
+//				in = null;
+//			}
+//			if (out != null) {
+//				out.close();
+//				out = null;
+//			}
+//			oldFile.delete();
+//		}
+//		catch(Exception e) {
+//			e.printStackTrace();
+//			return 2;
+//		}
+//		return 0;
+//	}
+
+    private static int convertBookmarkFile(final Context context, String contentId) {
+        String newPath = getInSideUserSavePath(context);
+        String oldPath = getInSideUserSavePath(context) + File.separator + Constants.OLD_SUBFOLDER;
+        String veryOldPath = getVeryOldInSideUserSavePath(context);
+        
+        if(oldPath != null) {
+            File oldDir = new File(oldPath);
+            if(oldDir != null && oldDir.isDirectory()) {
+                File oldAuto = new File(oldDir.getAbsolutePath() + File.separator + contentId + Constants.XMDF_RESUME_FILE_EXT);
+                File newAuto = new File(newPath + File.separator + contentId + Constants.XMDF_RESUME_FILE_EXT);
+                
+                if(oldAuto != null && oldAuto.exists()) {
+                    if(newAuto != null && newAuto.exists())
+                        oldAuto.delete();
+                    else
+                        oldAuto.renameTo(newAuto);
+                }
+                
+                File oldUnread = new File(oldDir.getAbsolutePath() + File.separator + contentId + Constants.XMDF_UNREAD_FILE_EXT);
+                File newUnread = new File(newPath + File.separator + contentId + Constants.XMDF_UNREAD_FILE_EXT);
+                
+                if(oldUnread != null && oldUnread.exists()) {
+                    if(newUnread != null && newUnread.exists())
+                        oldUnread.delete();
+                    else
+                        oldUnread.renameTo(newUnread);
+                }
+            }
+        }
+        
+        if(veryOldPath != null) {
+            File veryOldDir = new File(veryOldPath);
+            if(veryOldDir != null && veryOldDir.isDirectory()) {
+                File veryOldAuto = new File(veryOldDir.getAbsolutePath() + File.separator + contentId + Constants.XMDF_RESUME_FILE_EXT);
+                File newAuto = new File(newPath + File.separator + contentId + Constants.XMDF_RESUME_FILE_EXT);
+                
+                if(veryOldAuto != null && veryOldAuto.exists()) {
+                    if(newAuto != null && newAuto.exists())
+                        veryOldAuto.delete();
+                    else
+                        veryOldAuto.renameTo(newAuto);
+                }
+                
+                File veryOldUnread = new File(veryOldDir.getAbsolutePath() + File.separator + contentId + Constants.XMDF_UNREAD_FILE_EXT);
+                File newUnread = new File(newPath + File.separator + contentId + Constants.XMDF_UNREAD_FILE_EXT);
+
+                if(veryOldUnread != null && veryOldUnread.exists()) {
+                    if(newUnread != null && newUnread.exists())
+                        veryOldUnread.delete();
+                    else
+                        veryOldUnread.renameTo(newUnread);
+                }
+                
+            }
+        }
+        
+        return 0;
+    }
+	
+	public static int getVersionCode(Context context) {
+		int ver;
+		try {
+			ver = context.getPackageManager().getPackageInfo(context.getPackageName(), 1).versionCode;
+		} catch (NameNotFoundException e) {
+			ver = -1;
+		}
+		return ver;
+	}
+
+	public static String getUserDirectryName(Context context) {
+		String userID = EbookPreferences.getString(EbookPreferences.USER_ID, "");
+		if (userID.equals("")) {
+			return "";
+		}
+		return userID;
+	}
+
+	public static String getOldUserDirectryName(Context context) {
+		String userID = Encrypt.decodeTripleDES(context, EbookPreferences.getString(EbookPreferences.USER_ID, ""));
+		if (userID.equals("")) {
+			return "";
+		}
+		return Base64.encodeToString(userID.getBytes(), Base64.NO_WRAP);
+	}
+
+	public static boolean canUseExternalMemory() {
+		String state = Environment.getExternalStorageState();
+		return state.equals(Environment.MEDIA_MOUNTED);
+	}
+
+	/**
+	 * ?�部?�ス(?�ー?�ーNo付）?�ィ?�ク?�リ??���?
+	 * @param context
+	 * @return
+	 */
+	public static String getInSideUserSavePath(Context context) {
+		File userDir = new File(new StringBuilder(context.getFilesDir().getPath()).append(File.separator)
+				.append(getUserDirectryName(context)).append(File.separator).toString());
+		if (!userDir.exists()) {
+			userDir.mkdir();
+		}
+		return userDir.getPath().concat(File.separator);
+	}
+
+	public static String getOldInSideUserSavePath(Context context) {
+		File userDir = new File(new StringBuilder(context.getFilesDir().getPath()).append(File.separator)
+				.append(getOldUserDirectryName(context)).append(File.separator).toString());
+		if (!userDir.exists()) {
+			return null;
+		}
+		return userDir.getPath().concat(File.separator);
+	}
+
+	public static String getVeryOldInSideUserSavePath(Context context) {
+		File userDir = new File(new StringBuilder(context.getFilesDir().getPath()).append(File.separator).toString());
+		if (!userDir.exists()) {
+			userDir.mkdir();
+		}
+		return userDir.getPath().concat(File.separator);
+	}
+
+	/**
+	 * 外部?�ス?�ィ?�ク?�リ??���?
+	 * @param context
+	 * @return
+	 */
+	public static String getOutSideSavePath(Context context) {
+		if (canUseExternalMemory() && context.getExternalFilesDir(null) != null) {
+			return context.getExternalFilesDir(null).getPath() + File.separator;
+		}
+		return "";
+	}
+
+	/**
+	 * 外部?�ス（ユ?�ザ?�No付）?�ィ?�ク?�リ??���?
+	 * @param context
+	 * @return
+	 */
+	public static String getOutSideUserSavePath(Context context) {
+		if (canUseExternalMemory()) {
+		    if (context.getExternalFilesDir(null) == null) {
+		        return "";
+		    }
+			File userDir = new File(new StringBuilder(context.getExternalFilesDir(null).getPath()).append(File.separator)
+					.append(getUserDirectryName(context)).append(File.separator).toString());
+
+			if (!userDir.exists()) {
+				userDir.mkdir();
+			}
+
+			return userDir.getPath().concat(File.separator);
+		}
+		return "";
+	}
+	
+	public static String getOldOutSideUserSavePath(Context context) {
+		if (canUseExternalMemory()) {
+		    if (context.getExternalFilesDir(null) == null) {
+		        return "";
+		    }
+			File userDir = new File(new StringBuilder(context.getExternalFilesDir(null).getPath()).append(File.separator)
+					.append(getOldUserDirectryName(context)).append(File.separator).toString());
+
+			if (!userDir.exists()) {
+				return null;
+			}
+
+			return userDir.getPath().concat(File.separator);
+		}
+		return "";
+	}
+	
+	public static String getVeryOldOutSideUserSavePath(Context context) {
+		if (canUseExternalMemory()) {
+		    if (context.getExternalFilesDir(null) == null) {
+		        return "";
+		    }
+			File userDir = new File(new StringBuilder(context.getExternalFilesDir(null).getPath()).append(File.separator).toString());
+
+			if (!userDir.exists()) {
+				userDir.mkdir();
+			}
+
+			return userDir.getPath().concat(File.separator);
+		}
+		return "";
+	}
+	
+	public static String getDownloadedFolder(Context context, int storePosition) {
+		String path = null;
+		switch (storePosition) {
+		case Constants.STORAGE_NOT_SAVE:
+		case Constants.STORAGE_INTERNAL:
+			path = getInSideUserSavePath(context);
+			break;
+		case Constants.STORAGE_EXTERNAL:
+			path = getOutSideUserSavePath(context);
+			break;
+        case Constants.STORAGE_OLD_INTERNAL:
+            path = getInSideUserSavePath(context) + Constants.OLD_SUBFOLDER + File.separator;
+            break;
+        case Constants.STORAGE_OLD_EXTERNAL:
+            path = getOutSideUserSavePath(context) + Constants.OLD_SUBFOLDER + File.separator;
+            break;
+        case Constants.STORAGE_VERY_OLD_INTERNAL:
+            path = getVeryOldInSideUserSavePath(context);
+            break;
+        case Constants.STORAGE_VERY_OLD_EXTERNAL:
+            path = getVeryOldOutSideUserSavePath(context);
+            break;
+		default:
+			break;
+		}
+		return path;
+	}
+	
+	public static long getAvailableSpaceOfDownloadFolder(Context context, int storePosition) {
+		String path = null;
+		switch (storePosition) {
+		case Constants.STORAGE_NOT_SAVE:
+		case Constants.STORAGE_INTERNAL:
+			path = context.getFilesDir().getPath();
+			break;
+		case Constants.STORAGE_EXTERNAL:
+			path = context.getExternalFilesDir(null).getPath();
+		default:
+			break;
+		}
+		final StatFs stat = new StatFs(path);
+		final long blockSize = stat.getBlockSize();
+		final long availableBlocks = stat.getAvailableBlocks();
+		return availableBlocks * blockSize; 
+	}
+	
+//	public static String getOldDownloadedFolder(Context context, int storePosition) {
+//		String path = null;
+//		switch (storePosition) {
+//		case Constants.STORAGE_INTERNAL:
+//			path = getOldInSideUserSavePath(context);
+//			break;
+//		case Constants.STORAGE_EXTERNAL:
+//			path = getOldOutSideUserSavePath(context);
+//		default:
+//			break;
+//		}
+//		return path;
+//	}
+	
+	/**
+	 * Delete contents' files
+	 *  
+	 * @param context Application context
+	 * @param storePosition Contents' stored position
+	 * @param fileName Name of file
+	 * @return Return true when deleted, otherwise false.
+	 */
+	public static boolean deleteDownloadedFile(Context context, int storePosition, String fileName) {
+		if(storePosition == Constants.STORAGE_ASK)
+			return false;
+		
+		final String path = getDownloadedFolder(context, storePosition);
+		if(path != null) {
+			final File fileToDelete = new File(path + File.separator + fileName);
+			if(fileToDelete.exists())
+				return fileToDelete.delete();
+		}
+		return false;
+	}
+	
+	public static void loadSystemDefaultFont(Context context) {
+		SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
+		if(!pref.contains(EbookPreferences.DEFAULT_FONT_PATH)) {
+			File file = new File("/system/fonts");
+			String[] fontList = file.list();
+			
+			if(fontList != null) {
+				String saveFont = null;
+				String motoya = null;
+				String droid = null;
+				String droidFallback = null;
+				for(int i = 0 ; i < fontList.length ; i++) {
+					if(motoya == null) {
+						if(fontList[i].startsWith("MTL") && fontList[i].endsWith(".ttf"))
+							motoya = fontList[i];
+					}
+
+					if(droid == null) {
+						if(fontList[i].startsWith("Droid") && fontList[i].endsWith("Japanese.ttf"))
+							droid = fontList[i];
+					}
+
+					if(droidFallback == null) {
+						if(fontList[i].startsWith("Droid") && fontList[i].endsWith("Fallback.ttf"))
+							droidFallback = fontList[i];
+					}
+
+					if(motoya != null && droid != null)
+						break;
+				}
+
+				if(motoya != null && droid != null) {
+					saveFont = motoya;
+				} else if(motoya == null && droid == null) {
+					saveFont = droidFallback;
+				} else {
+					saveFont = (motoya != null ? motoya : droid);
+				}
+
+				android.util.Log.e(TAG, "[RIG] droid : " + droid);
+				android.util.Log.e(TAG, "[RIG] motoya : " + motoya);
+				android.util.Log.e(TAG, "[RIG] fallback : " + droidFallback);
+				android.util.Log.e(TAG, "[RIG] saveFont : " + saveFont);
+
+				pref.edit().putString(EbookPreferences.DEFAULT_FONT_PATH, saveFont).commit();
+			}
+		}
+	}
+
+	public static String getSystemDefaultFont(Context context) {
+		SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
+		return pref.getString(EbookPreferences.DEFAULT_FONT_PATH, null);
+	}
+	
+		/**
+	 * ?�ー?�オ?�ジ?�ク?�を保存?�ま??
+	 * TODO?�ID?�よ?�フ?�ル?�?�け
+	 * @param path ?�ー?�フ?�イ?�と?�て保存?�る?�ス
+	 * @param object 保存?�る?�ー?�オ?�ジ?�ク??
+	 * @return
+	 */
+//	public static boolean saveOldFile(Context context, String fileName, byte[] bytes) {
+//		FileOutputStream fos = null;
+//		BufferedOutputStream bos = null;
+//
+//		try {
+//
+//			File userDir = new File(Util.getOldInSideUserSavePath(context));
+//			if (!userDir.exists()) {
+//				if (userDir.mkdir()) {
+//					return false;
+//				}
+//			}
+//
+//			File file = new File(Util.getOldInSideUserSavePath(context).concat(fileName));
+//			
+//			if (file.exists()) {
+//				file.delete();
+//			}
+//
+//			file.createNewFile();
+//			// ?�力?�ト?�ー?�の?�成
+//			fos = new FileOutputStream(file);
+//			bos = new BufferedOutputStream(fos);
+//
+//			// ?�力?�ト?�ー?�へ??��?�込?�（?�ァ?�ル?�の?�き込み�?
+//			bos.write(bytes);
+//			// 後始??
+//			bos.flush();
+//
+//			fos.flush();
+//			fos.close();
+//
+//			// to get save files for test
+//			File outer = new File(Environment.getExternalStorageDirectory(), fileName);
+//			if (outer.exists()) {
+//				outer.delete();
+//			}
+//			outer.createNewFile();
+//			fos = new FileOutputStream(outer);
+//			bos = new BufferedOutputStream(fos);
+//			bos.write(bytes);
+//			bos.flush();
+//			fos.flush();
+//			fos.close();
+//			return true;
+//		} catch (IOException e) {
+//			e.printStackTrace();
+//			return false;
+//		} finally {
+//			try {
+//				if (bos != null) {
+//					bos.close();
+//				}
+//				if (fos != null) {
+//					fos.close();
+//				}
+//			} catch (IOException ex) {
+//			}
+//		}
+//	}
+	
+	public static void deleteFile(File file) {
+		if(file == null) return;
+		if(file.isDirectory()) {
+			File[] fileList = file.listFiles();
+			for(File f : fileList) {
+				deleteFile(f);
+			}
+			file.delete();
+		}
+		else {
+			if(file.exists()) file.delete();
+		}
+	}
+
+	static public void requestAutoRotation(Activity activity) {
+	    int orientation;
+	    int systemAutoOrientation;
+	    try {
+            systemAutoOrientation = Settings.System.getInt(activity.getContentResolver(), Settings.System.ACCELEROMETER_ROTATION);
+        } catch (SettingNotFoundException e) {
+            e.printStackTrace();
+            systemAutoOrientation = 1;
+        }
+        if (EbookPreferences.getBoolean(EbookPreferences.SETTING_AUTO_ROTATE, true) && 0 != systemAutoOrientation) {
+            orientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR;
+        } else {
+            int defaultOrientation;
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.GINGERBREAD 
+                    && EbookApplication.isScreenLarge()) {
+                defaultOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+            } else {
+                defaultOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+            }
+            orientation = EbookPreferences.getInt(EbookPreferences.LOCKED_ORIENTATION, defaultOrientation);
+        }
+        activity.setRequestedOrientation(orientation);
+	}
+
+    static public int getOrientation(Activity activity) {
+	    WindowManager wm = (WindowManager)activity.getSystemService(Context.WINDOW_SERVICE);
+        Display display = wm.getDefaultDisplay();
+        final int ww = display.getWidth();
+        final int wh = display.getHeight();
+	    int rotation = display.getRotation();
+	    final boolean isPortrait = wh > ww;
+
+        if (isPortrait) {
+            switch (rotation) {
+                case Surface.ROTATION_0:
+                    return ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+                case Surface.ROTATION_90:
+                    return ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT;
+                case Surface.ROTATION_180:
+                    return ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT;
+                case Surface.ROTATION_270:
+                    return ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+            }
+        } else {
+            switch (rotation) {
+                case Surface.ROTATION_0:
+                    return ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+                case Surface.ROTATION_90:
+                    return ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+                case Surface.ROTATION_180:
+                    return ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE;
+                case Surface.ROTATION_270:
+                    return ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE;
+            }
+        }
+	    return ActivityInfo.SCREEN_ORIENTATION_NOSENSOR;
+	}
+
+	static public void onAutoRotationChanged(Activity activity, boolean allowed) {
+	    if (!allowed) {
+	        int orientation = getOrientation(activity);
+	        EbookPreferences.putInt(EbookPreferences.LOCKED_ORIENTATION, orientation);
+	    }
+	    requestAutoRotation(activity);
+	}
+
+	public static String getBsUrl(Context context, ContentInfo info) throws ResponseErrorException {
+		Map<String, String> params = new HashMap<String, String>();
+		DecimalFormat format = new DecimalFormat("0000000000");
+		params.put(HttpCommunicationService.TITLE_ID, format.format(info.titleId));
+		params.put(HttpCommunicationService.ITEM_ID, info.contentId);
+		if(info.isSample) {
+			params.put(HttpCommunicationService.SAMPLE_FLG, "1");
+		} else {
+			params.put(HttpCommunicationService.SAMPLE_FLG, "0");
+		}
+
+		String result = null;
+		ResponseErrorException ree = null;
+		try {
+			
+			String completeUri = ServerInterface.getApiUrl(context, ServerInterface.API_CONTENTS_DOWNLOAD_COMPLETE);
+			Map<String, String> completeRequest = new HashMap<String, String>();
+			completeRequest.put(HttpCommunicationService.URI, completeUri);
+			completeRequest.put(TitleInfo.TITLE_ID, Util.getTitleId(info.titleId));
+			completeRequest.put(ContentInfo.CONTENTS_ID, info.contentId);
+			completeRequest.put(ExtraKeys.BOOK_FORMAT_ID, String.valueOf(info.contentFormat));
+			completeRequest.put(ExtraKeys.SAMPLE_FLG, (info.isSample)?"1":"0");
+			HttpCommunicationService.postRequest(completeRequest, false, context);
+
+			String uri = ServerInterface.getApiUrl(context, ServerInterface.API_DOWNLOAD_BSURL);
+			Map<String, String> map = new HashMap<String, String>();
+			map.put(HttpCommunicationService.URI, uri);
+			Iterator<Entry<String, String>> ite = params.entrySet().iterator();
+			while(ite.hasNext()) {
+				Entry<String, String> item = ite.next();
+				map.put(item.getKey(), item.getValue());
+			}
+			map.put("imei", getImei(context));
+			String response = HttpCommunicationService.postRequest(map, context);
+			Map<String, String> responseMap = Util.responseSplit(response);
+			if(responseMap.containsKey("dl_url")) {
+				result = responseMap.get("dl_url");
+			}
+		} catch(ResponseErrorException ex) {
+		    ree = ex;
+		    ex.printStackTrace();
+		} catch(Exception e) {
+			if(Util.isAirPlaneMode(context))
+				ree = new ResponseErrorException(Integer.toString(HttpCommunicationService.RESPONSE_AIRPLAIN_MODE));
+			else
+				ree = new ResponseErrorException(Integer.toString(HttpCommunicationService.RESPONSE_CONNECTION));
+		    e.printStackTrace();
+		}
+		if(null != ree) {
+		    throw ree;
+		}
+		return result;
+	}
+	
+	public static List<File> getBookMarkFile(Context context) {
+		// ?�ピ??象外?�ァ?�ル?張子
+		@SuppressWarnings("serial")
+        Map<String, Integer> file_exts = new HashMap<String, Integer>() {{
+				put(".zbf", 1);
+				put(".book", 2);
+				put(".hbc", 3);
+				put(".bin", 4);
+				put(".cmt", 5);
+				put(".bex", 6); //???�送信?�れ?�い??
+				put(".zip", 7);
+		}};
+
+	    List<File> list = new ArrayList<File>();
+		String insideFilePath = getInSideUserSavePath(context) + File.separator + Constants.OLD_SUBFOLDER;
+		if(insideFilePath != null) {
+	        File insideFileDir = new File(insideFilePath);
+	        try {
+	            // retrieve files from the storage directory for version code 15
+	            if (insideFileDir.isDirectory()) {
+	                String[] children = insideFileDir.list();
+	                for (int i = 0; i < children.length; i++) {
+	                    File childrenFile = new File(insideFileDir, children[i]);
+	                    if (childrenFile.isFile()) {
+	                        String fileName = childrenFile.getName();
+	                        int idx = fileName.lastIndexOf(".");
+	                        if(idx >= 0) {
+    	                        String exts = fileName.substring(idx, fileName.length());
+    	                        if (!file_exts.containsKey(exts)) {
+    	                            list.add(childrenFile);
+    	                        }
+	                        }
+	                    }
+	                }
+	            }
+	            int count = list.size();
+	            // retrieve files from the storage directory for version code 11
+	            insideFileDir = new File(getInSideSavePath(context));
+	            if (insideFileDir.isDirectory()) {
+	                String[] children = insideFileDir.list();
+	                for (int i = 0; i < children.length; i++) {
+	                    File childrenFile = new File(insideFileDir, children[i]);
+	                    if (childrenFile.isFile()) {
+	                        String fileName = childrenFile.getName();
+                            int idx = fileName.lastIndexOf(".");
+                            if(idx > 0) {
+    	                        String exts = fileName.substring(idx, fileName.length());
+    	                        if (!file_exts.containsKey(exts)) {
+    	                            if (!containId(list, count, childrenFile)) {
+    	                                list.add(childrenFile);
+    	                            } else {
+    	                                childrenFile.delete();
+    	                            }
+    	                        }
+                            }
+	                    }
+	                }
+	            }
+	        } catch (Exception e) {
+	            e.printStackTrace();
+	        }
+		}
+		for (File file : list) {
+			Log.d(TAG, file.getPath());
+		}
+		return list;
+	}
+	
+	private static boolean containId(List<File> list, int count, File file) {
+		String listName;
+		String fileName;
+		fileName = file.getName().substring(file.getName().lastIndexOf(file.getName()), file.getName().lastIndexOf("."));
+		for (int i = 0; i < count; i++) {
+			File f = list.get(i);
+			listName = f.getName().substring(f.getName().lastIndexOf(f.getName()), f.getName().lastIndexOf("."));
+			if (fileName.equals(listName))
+				return true;
+		}
+		return false;
+	}
+
+	public static File[] getCacheFiles(Context context, final String fileName) {
+		File dir = new File(context.getCacheDir().getAbsolutePath());
+		File [] cacheFiles = dir.listFiles(new FilenameFilter() {
+		    @Override
+		    public boolean accept(File dir, String name) {
+		        return name.contains(fileName);
+		    }
+		});
+		
+		return cacheFiles;
+	}
+
+    public static void moveBookmarkFiles(Context context, final String contentId, final String ext, boolean fromCache) {
+        String movePath;
+        File dir;
+        if(fromCache) {
+            movePath = getInSideUserSavePath(context);
+            dir = new File(context.getCacheDir().getAbsolutePath());
+        }
+        else {
+            movePath = context.getCacheDir().getAbsolutePath();
+            dir = new File(getInSideUserSavePath(context));
+        }
+        
+        
+        if(dir.isDirectory()) {
+            File [] files = dir.listFiles(new FilenameFilter() {
+                @Override
+                public boolean accept(File dir, String name) {
+                    int index = name.lastIndexOf(".");
+                    if(index > 0) {
+                        String fileExt = name.substring(index);
+                        if(name.contains(contentId) && ext.equals(fileExt))
+                            return true;
+                    }
+                    return false;
+                }
+            });
+            
+            int i, len = files.length;
+            for(i = 0; i < len; i++) {
+                String fileName = files[i].getName();
+                File bookmark = new File(dir.getAbsolutePath() + File.separator + fileName);
+                if(bookmark != null && bookmark.exists()) {
+                    File newBookmark = new File(movePath + File.separator + fileName);
+                    if(newBookmark != null && newBookmark.exists()) {
+                        newBookmark.delete();
+                    }
+                    if(fromCache)
+                        copyFile(bookmark, newBookmark);
+                    else
+                        bookmark.renameTo(newBookmark);
+                }
+            }
+        }
+    }
+    
+    private static void copyFile(File srcFile, File destFile) {
+        if (srcFile == null || !srcFile.exists())
+            return;
+        if (destFile != null && destFile.exists())
+            destFile.delete();
+
+        try {
+            InputStream is = new FileInputStream(srcFile);
+            BufferedInputStream in = new BufferedInputStream(is);
+            OutputStream os = new FileOutputStream(destFile);
+            BufferedOutputStream out = new BufferedOutputStream(os);
+    
+            byte buf[] = new byte[4096];
+            int size = -1;
+    
+            // read remain file
+            while ((size = in.read(buf)) != -1) {
+                out.write(buf, 0, size);
+                out.flush();
+            }
+    
+            if (in != null) {
+                in.close();
+                in = null;
+            }
+            if (out != null) {
+                out.close();
+                out = null;
+            }
+                
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+	public static String getNextContentId(String contentId) {
+		if(contentId == null || contentId.equals(""))
+				return contentId;
+
+		String oldContentId = contentId.substring(contentId.length() - 4);
+		return contentId.substring(0, contentId.length() - 4)
+				+ String.format("%04d", Integer.parseInt(oldContentId) + 1);
+	}
+
+
+	/**
+	 * ?�ォ?�マ?�ト?�得
+	 * ?�ァ?�ル?�よ?�フ?�イ?�フ?�ー?�ッ?�を?�得?�る
+	 * @return
+	 */
+	public static int getBookFormatId(String ext) {
+		Map<String, Integer> extMap = new HashMap<String, Integer>();
+		extMap.put(".epub", Constants.CONTENTS_BOOK_FORMAT_EPUB);
+		extMap.put(".hbc", Constants.CONTENTS_BOOK_FORMAT_HBC);
+		extMap.put(".book", Constants.CONTENTS_BOOK_FORMAT_DOTBOOK);
+		extMap.put(".zbf", Constants.CONTENTS_BOOK_FORMAT_XMDF);
+		extMap.put(".zip", Constants.CONTENTS_BOOK_FORMAT_BS_HYBRID);
+
+		if(ext != null) {
+			if(extMap.containsKey(ext)) {
+				return extMap.get(ext);
+			} else {
+				return Constants.CONTENTS_BOOK_FORMAT_BS;
+			}
+		}
+		return Constants.CONTENTS_BOOK_FORMAT_NONE;
+	}
+
+	/**
+	 * 続き?�読?�?�URL?�取�?
+	 * @param title_id
+	 * @param contents_id
+	 * @return
+	 */
+	public static Uri getBuyContinueUrl(Context context, Long title_id) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.detail));
+		DecimalFormat format = new DecimalFormat("0000000000");
+		HashMap<String, String> params = new HashMap<String, String>();
+		params.put("title_id", format.format(title_id));
+		uri = appendItemIds(uri, params);
+		uri = appendTakeOverData(context, uri);
+		uri = appendGoogleAnalytics(context, uri);
+		return uri.build();
+	}
+
+    static public int getErrorCode(Throwable t) {
+        int tCode = -1;
+        try {
+            tCode = Integer.parseInt(t.getMessage());
+        } catch (NumberFormatException nfe) {  //  Ignore it.
+        }
+
+        return getErrorCode(tCode);
+    }
+
+    static public int getErrorCode(int code) {
+        switch (code) {
+            case 0:
+                return Constants.ERROR_CODE_OK;
+
+            case 100: // HttpCommunicationService.ERROR_CODE_AUTH_ERROR
+                return Constants.ERROR_CODE_COOKIE_EXPIRED;
+
+	    	case 103: //HttpCommunicationService.ERROR_CODE_DATA_NONE:
+	    		return Constants.ERROR_CODE_IMEI_RETRIEVE_FAIL;
+
+	    	case 401: // HttpCommunicationService.RESPONSE_ALL_WEB_MAINTENANCE:
+            case 405: // HttpCommunicationService.RESPONSE_WEB_MAINTENANCE:
+                return Constants.ERROR_CODE_MAINTENANCE;
+
+            case HttpCommunicationService.RESPONSE_FAILED:
+            case HttpCommunicationService.RESPONSE_CONNECTION:
+            case HttpCommunicationService.RESPONSE_TIMEOUT:
+            	return Constants.ERROR_CODE_NETWORK_FAIL;
+
+            case 404: // content type(smartphone/tablet) mismatch
+                return Constants.ERROR_CODE_TYPE_MISMATCH;
+
+            case 450: // HttpCommunicationService..RESPONSE_HTTP_ERROR
+                return Constants.ERROR_CODE_SERVER_FAIL;
+
+            case HttpCommunicationService.RESPONSE_RESULT_NG:
+                return Constants.ERROR_CODE_DOWNLOAD_FAIL;
+
+            case HttpCommunicationService.RESPONSE_AIRPLAIN_MODE:
+                return Constants.ERROR_CODE_AIRPLANE_MODE;
+
+            case HttpCommunicationService.RESPONSE_PROXY_MAINTENANCE:
+                return Constants.ERROR_CODE_PROXY_ERROR;
+
+	    	case HttpCommunicationService.RESPONSE_IMEI_REPLACE_FAIL:
+	    		return Constants.ERROR_CODE_IMEI_REPLACE_FAIL;
+
+            default:
+                break;
+        }
+        return Constants.ERROR_CODE_UNKNOWN;
+    }
+
+	public static CustomDialog createErrorDialog(Context context, int errorCode, String target, int requestCode, boolean finish) {
+		CustomDialog dialog = new CustomDialog();
+		Bundle args = new Bundle();
+		int titleId = 0;
+		int messageId = 0;
+		int right = R.string.ok;
+		int left = -1;
+		int link = -1;
+		String uri = null;
+		switch(errorCode) {
+			case Constants.ERROR_CODE_NOT_MATCH:
+				titleId = R.string.warning;
+				messageId = R.string.error_content_fail;
+				right = R.string.dialog_delete_and_download_again;
+				left = R.string.cancel;
+				break;
+
+			case Constants.ERROR_CODE_NO_SIM:
+				titleId = R.string.warning;
+				messageId = R.string.error_no_sim_card;
+				break;
+
+			case Constants.ERROR_CODE_AIRPLANE_MODE:
+				titleId = R.string.warning;
+				messageId = R.string.error_airplane_mode;
+				break;
+
+			case Constants.ERROR_CODE_TYPE_MISMATCH:
+			    titleId = R.string.warning;
+	            if(EbookApplication.isScreenLarge())
+	            	messageId = R.string.error_smartphone_only_content;
+	            else
+	            	messageId = R.string.error_tablet_only_content;
+				link = R.string.check_available_devices;
+				uri = Util.getSupportedDeviceUrl(context).toString();
+			    break;
+
+			case Constants.ERROR_CODE_NETWORK_FAIL:
+			    titleId = R.string.error;
+			    messageId = R.string.error_network_fail;
+			    break;
+
+			case Constants.ERROR_CODE_SERVER_FAIL:
+			    titleId = R.string.error;
+			    messageId = R.string.error_server_fail;
+			    break;
+
+			case Constants.ERROR_CODE_DOWNLOAD_FAIL:
+			    titleId = R.string.error;
+			    messageId = R.string.dialog_download_fail_content;
+			    break;
+
+			case Constants.ERROR_CODE_MAINTENANCE:
+			    titleId = R.string.warning;
+			    messageId = R.string.error_maintenance;
+				link = R.string.detail_info;
+				uri = getStoreTopUrl(context).toString();
+			    break;
+
+			case Constants.ERROR_CODE_TABLET_OR_PHONE:
+				titleId = R.string.warning;
+				if(EbookApplication.isScreenLarge()) 
+					messageId = R.string.error_smartphone_only_content;
+				else
+					messageId = R.string.error_tablet_only_content;
+				link = R.string.check_available_devices;
+				uri = Util.getSupportedDeviceUrl(context).toString();
+				break;
+
+			case Constants.ERROR_CODE_PROXY_ERROR:
+			    titleId = R.string.error;
+			    messageId = R.string.error_server_fail;
+				break;
+
+			case Constants.ERROR_CODE_IMEI_LIMIT:
+				titleId = R.string.error_imei_limit_over_title;
+				messageId = R.string.error_imei_limit_over;
+				break;
+
+			case Constants.ERROR_CODE_LOGIN_ERROR:
+			    titleId = R.string.error;
+				if(Util.isAirPlaneMode(context)) {
+				    messageId = R.string.error_airplane_mode;
+				} else {
+					if(Util.isNetworkAvailable(context))
+						messageId = R.string.error_server_fail;
+					else
+						messageId = R.string.error_network_fail;
+				}
+				break;
+
+			case Constants.ERROR_CODE_AUTH_TIME:
+				titleId = R.string.error;
+				messageId = R.string.error_auth_time;
+				break;
+
+            case Constants.ERROR_CODE_LOGIN_FAIL:
+                titleId = R.string.warning;
+                messageId = R.string.error_cannot_login_while_downloading;
+                break;
+
+            case Constants.ERROR_CODE_IMEI_RETRIEVE_FAIL:
+                titleId = R.string.error;
+                messageId = R.string.error_obtain_imei_fail;
+				link = R.string.supported_devices;
+				uri = Util.getSupportedDeviceUrl(context).toString();
+				break;
+
+            case Constants.ERROR_CODE_IMEI_REPLACE_FAIL:
+                titleId = R.string.error;
+                messageId = R.string.error_change_device;
+				break;
+
+			default:
+			    titleId = R.string.error;
+			    messageId = R.string.page_error_unknown_domain;
+		}
+
+		args.putInt(ExtraKeys.CUSTOM_DIALOG_TITLE, titleId);
+		args.putInt(ExtraKeys.CUSTOM_DIALOG_MESSAGE, messageId);
+		args.putInt(ExtraKeys.CUSTOM_DIALOG_RIGHT_BUTTON, right);
+		if(left >= 0)
+			args.putInt(ExtraKeys.CUSTOM_DIALOG_LEFT_BUTTON, left);
+		if(finish)
+			args.putInt(ExtraKeys.CUSTOM_DIALOG_REQUESTCODE, Constants.REQUEST_FINISH_WHEN_DISMISS);
+		if(target != null) {
+			args.putString(ExtraKeys.CUSTOM_DIALOG_TARGET_FRAGMENT, target);
+			if(requestCode > 0)
+				args.putInt(ExtraKeys.CUSTOM_DIALOG_REQUESTCODE, requestCode);
+			else
+				args.putInt(ExtraKeys.CUSTOM_DIALOG_REQUESTCODE, Constants.REQUEST_FINISH_WHEN_ERROR);
+		}
+		if(link > 0) {
+			args.putInt(ExtraKeys.CUSTOM_DIALOG_LINK_TAG, link);
+			if(uri != null)
+				args.putString(ExtraKeys.CUSTOM_DIALOG_LINK_URI, uri);
+		}
+		dialog.setArguments(args);
+		return dialog;
+	}
+
+    public static Map<String, String> getUpgradeUrl(Context context) {
+    	try {
+			Map<String, String> map = new HashMap<String, String>();
+			map.put(HttpCommunicationService.URI, ServerInterface.getApiUrl(context, ServerInterface.API_DCMSTORE_URI));
+			map.put(HttpCommunicationService.LAUNCH_FLAG, "1");
+			map.put(HttpCommunicationService.PACKAGE_NAME, context.getPackageName());
+
+			Map<String, String> responseMap = HttpCommunicationService.postRequestAll(map);
+			if(responseMap == null) {
+				return null;
+			}
+
+			if(responseMap.containsKey(HttpCommunicationService.RESPONSE_KEY_ERROR_CODE)) {
+				String errorCode = responseMap.get(HttpCommunicationService.RESPONSE_KEY_ERROR_CODE);
+				if(errorCode.equals(HttpCommunicationService.ERROR_CODE_OK)
+					|| errorCode.equals(HttpCommunicationService.ERROR_CODE_AUTH_ERROR)) {
+					return responseMap;
+				} else if(!errorCode.equals(HttpCommunicationService.ERROR_CODE_AUTH_ERROR)) {
+					android.util.Log.e("DOWN_URL", "error code:"+errorCode);
+					return null;
+				}
+			} else {
+				if(responseMap.containsKey(HttpCommunicationService.RESULT)) {
+					if(responseMap.get(HttpCommunicationService.RESULT).equals("OK")) 
+						return responseMap;
+				}
+			}
+		} catch (Exception e) {
+			android.util.Log.e("DOWN_URL", "Exception:"+e.getMessage());
+			e.printStackTrace();
+			return null;
+		}
+		return null;
+    }
+
+	public static Uri getMaintenanceUrl(Context context) {
+		Uri.Builder uri = new Uri.Builder();
+		uri.scheme(SCHEME_HTTP);
+		final String authority = (Debug.USE_STAGING_SERVER)
+				?context.getResources().getString(R.string.authority_debug)
+						:context.getResources().getString(R.string.authority);
+		uri.authority(authority);
+		uri.path(context.getString(R.string.maintenance_path));
+		return uri.build();
+	}
+
+    public static Uri getSecurityMaintenanceUrl(Context context) {
+        Uri.Builder uri = new Uri.Builder();
+        uri.scheme(SCHEME_HTTP+"s");
+        final String authority = (Debug.USE_STAGING_SERVER)
+                ?context.getResources().getString(R.string.authority_debug)
+                        :context.getResources().getString(R.string.authority);
+        uri.authority(authority);
+        uri.path(context.getString(R.string.maintenance_path));
+        return uri.build();
+    }
+
+    private static final float LOW_DPI_STATUS_BAR_HEIGHT = 19f;
+    private static final float MEDIUM_DPI_STATUS_BAR_HEIGHT = 25f;
+    private static final float HIGH_DPI_STATUS_BAR_HEIGHT = 38f;
+    private static final float XHIGH_DPI_STATUS_BAR_HEIGHT = 50f;
+    private static final float XXHIGH_DPI_STATUS_BAR_HEIGHT = 75f;
+
+    // API9?�ら追加?�れ?�定義の?�め
+    private static final int DENSITY_XHIGH = 320;
+    // API16?�ら追加?�れ?�定義の?�め
+    private static final int DENSITY_XXHIGH = 480;
+
+       //?�テ?�タ?�バ?�の高さ?�取得す??
+    public static final float getStatusBarHeight(Context context) {
+        DisplayMetrics displayMetrics = new DisplayMetrics();
+        ((WindowManager) context.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay().getMetrics(displayMetrics);
+        float statusBarHeight = MEDIUM_DPI_STATUS_BAR_HEIGHT;
+
+        if(displayMetrics.densityDpi >= DENSITY_XXHIGH) {
+        	statusBarHeight = XXHIGH_DPI_STATUS_BAR_HEIGHT;
+        } else if(displayMetrics.densityDpi >= DENSITY_XHIGH) {
+        	statusBarHeight = XHIGH_DPI_STATUS_BAR_HEIGHT;
+        } else if(displayMetrics.densityDpi >= DisplayMetrics.DENSITY_HIGH) {
+        	statusBarHeight = HIGH_DPI_STATUS_BAR_HEIGHT;
+        } else if(displayMetrics.densityDpi >= DisplayMetrics.DENSITY_MEDIUM) {
+        	statusBarHeight = MEDIUM_DPI_STATUS_BAR_HEIGHT;
+        } else if(displayMetrics.densityDpi >= DisplayMetrics.DENSITY_LOW) {
+        	statusBarHeight = LOW_DPI_STATUS_BAR_HEIGHT;
+        }
+        return statusBarHeight;
+    }
+
+	public static String getImei(Context context) {
+		if(IMEI == null) {
+			TelephonyManager tm = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+			IMEI = tm.getDeviceId();
+			
+			//if no IMEI, assign fake IMEI.  IMEI should not be null anyway
+			if (IMEI == null )
+					IMEI = "123456789012345";
+		}
+		return IMEI;
+	}
+	
+	public static String getMsnNo(Context context) {
+		TelephonyManager tm = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+		if(MSN_NO == null) {
+			MSN_NO = tm.getSimSerialNumber();
+		}
+		return MSN_NO;
+	}
+	
+	public static NotificationCompat.Builder createNotificationBuilder(Context context, ContentInfo contentInfo, boolean showFailedRetryDialog) {
+		final NotificationCompat.Builder builder = new NotificationCompat.Builder(context);
+		Intent intent = new Intent(context, EbookLauncher.class);
+		intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+		intent.setAction(Intent.ACTION_VIEW);
+		
+		Bundle bundle = new Bundle();
+		bundle.putLong(TitleInfo.TITLE_ID, contentInfo.titleId);
+		bundle.putString(ContentInfo.CONTENTS_ID, contentInfo.contentId);
+		if (showFailedRetryDialog) {
+			bundle.putBoolean(ContentsDetailFragment.EXTRA_SHOW_DOWNLOAD_FAILED_DIALOG, true);
+		}
+		intent.putExtras(bundle);
+		
+		PendingIntent pendingIntentClick = PendingIntent.getActivity(
+				context, (int)contentInfo.id, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+		Intent deleteIntent = new Intent(ClearNotification.NOTIFICATION_CLEAR_ACTION);
+		PendingIntent pendingDelete = PendingIntent.getBroadcast(context, 0, deleteIntent, PendingIntent.FLAG_ONE_SHOT);
+		
+		builder.setSmallIcon(R.drawable.icon_notification)
+		.setContentIntent(pendingIntentClick)
+		.setLargeIcon(Util.getTitleImage(context, contentInfo.titleId, contentInfo.contentId))
+		.setContentTitle(contentInfo.contentName)
+		.setDeleteIntent(pendingDelete)
+		.setProgress(100, 0, false)
+		.setAutoCancel(true);
+
+		
+
+		return builder;
+	}
+
+	public static void notifyDownloadProgress(Context context, ContentInfo contentInfo, DownloadingState state, int errorCode) {
+		final Resources res = context.getResources();
+		final DownloadTaskInfo taskInfo = contentInfo.getDownloadTaskInfo();
+		if(taskInfo == null || taskInfo.notificationBuilder == null)
+			return;
+
+		String stateString = null;
+		switch(state) {
+			case WAIT:
+				stateString = res.getString(R.string.notification_wait_download);
+				taskInfo.notificationBuilder.setProgress(0, 0, true);
+				break;
+			case DOWNLOADING:
+				stateString = res.getString(R.string.notification_downloading);
+				taskInfo.notificationBuilder.setProgress(taskInfo.contentLength, taskInfo.downloadedSize, false);
+				break;
+			case DONE:
+				stateString = res.getString(R.string.notification_download_complete);
+				taskInfo.notificationBuilder.setProgress(0, 0, false);
+				break;
+			case FAILED:
+				int errorStringId = R.string.notification_download_fail;
+				if(errorCode > 0) {
+					switch(errorCode) {
+						case 401: // HttpCommunicationService.RESPONSE_ALL_WEB_MAINTENANCE
+                        case 405: // HttpCommunicationService.RESPONSE_ALL_WEB_MAINTENANCE
+							errorStringId = R.string.notification_maintenance_fail;
+							break;
+							
+                        case 402:
+                            errorStringId = R.string.notification_download_fail;
+                            break;
+
+						case HttpCommunicationService.RESPONSE_AIRPLAIN_MODE:
+							errorStringId = R.string.notification_airplane_mode;
+							break;
+					}
+				}
+				stateString = res.getString(errorStringId);
+				taskInfo.notificationBuilder.setProgress(0, 0, false);
+				break;
+			case CLEAR:
+				break;
+		}
+		taskInfo.notificationBuilder.setContentText(stateString);
+
+		NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+		if(state != DownloadingState.CLEAR) {
+		    if(state == DownloadingState.DONE || state == DownloadingState.FAILED) {
+	            manager.notify(-(int)contentInfo.id, taskInfo.notificationBuilder.build());
+	            manager.cancel((int)contentInfo.id);
+		    } else {
+	            manager.notify((int)contentInfo.id, taskInfo.notificationBuilder.build());
+		    }
+		} else {
+			manager.cancel((int)contentInfo.id);
+		}
+	}
+
+	public interface StateSupplier {
+	    public Bundle getStateBundle();
+	}
+	
+	public static void startBgDownload(final Context context, final ContentInfo bgContentInfo) {
+		Runnable work = new Runnable() {
+			@Override
+			public void run() {
+				List<DownloadQueueInfo> queue = 
+						EbookModel.queryDownloadQueueInfo(
+								context, 
+								bgContentInfo.titleId, 
+								bgContentInfo.contentId);
+				if(queue != null && queue.size() > 0)
+					return;
+
+				final DownloadQueueInfo dlQueueInfo = 
+						DownloadQueueInfo.createFromContentInfo(context, bgContentInfo);
+				EbookModel.addToDatabase(context, DownloadQueue.CONTENT_URI, dlQueueInfo);
+				EbookModel.runOnDatabaseThread(new Runnable() {
+					@Override
+					public void run() {
+						context.startService(new Intent(context, DownloadService.class));		
+					}
+				});
+			}
+		};
+		EbookModel.runOnDatabaseThread(work);
+
+		bgContentInfo.createDownloadTaskInfo();
+		DownloadTaskInfo taskInfo = bgContentInfo.getDownloadTaskInfo();
+		if(taskInfo == null) {
+			return;
+		}
+
+		if(taskInfo.notificationBuilder == null)
+			taskInfo.notificationBuilder = Util.createNotificationBuilder(context, bgContentInfo, false);
+		Util.notifyDownloadProgress(context, bgContentInfo, DownloadingState.WAIT, 0);
+	}
+
+    public static String getDisplayString(final Context context, String org) {
+        final int maxLen = context.getResources().getInteger(R.integer.textview_max_length);
+        if (null == org || org.length() <= maxLen) {
+            return org;
+        }
+        StringBuffer sb = new StringBuffer(maxLen);
+        sb.append(org.substring(0, maxLen));
+//        sb.append(Constants.CH_ELLIPSIS);
+        return sb.toString();
+    }
+}

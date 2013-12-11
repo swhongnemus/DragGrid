@@ -1,0 +1,854 @@
+/**
+Copyright (C) 2013 The Tiffany Framework Software, NemusTech, Inc. All rights reserved.
+ 
+Redistribution and use in source and binary forms, with or without modification, 
+are permitted provided that the following conditions are met:
+ 
+1. Redistributions of source code must retain the above copyright notice, this list of conditions.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions
+   in the documentation and/or other materials provided with the distribution.
+
+3. The name "Tiffany" must not be used to endorse or promote products derived from this software
+   without prior written permission.  For written permission, please contact mbiz@nemustech.com.
+
+4. Products derived from this software may not be called "Tiffany", 
+   nor may "Tiffany" appear in their name, without prior written permission from the NemusTech, Inc.
+*/
+
+package com.nemustech.widget.tf;
+
+import android.content.Context;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.Bitmap.Config;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.opengl.GLSurfaceView;
+import android.os.Build;
+import android.os.SystemClock;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.util.SparseArray;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewConfiguration;
+
+import com.nemustech.tiffany.TFObject;
+import com.nemustech.tiffany.TFObjectGroup;
+import com.nemustech.tiffany.TFWorld;
+import com.nemustech.tiffany.TFWorld.OnPostDrawListener;
+import com.nemustech.tiffany.TFWorld.OnWorldCreatedListener;
+import com.nemustech.tiffany.TFWorld.OnWorldResizedListener;
+import com.nemustech.tiffany.core.TFITouchable;
+import com.nemustech.tiffany.core.TFProjection;
+import com.nemustech.tiffany.fog.TFFogManager;
+import com.nemustech.tiffany.fog.TFLinearFog;
+import com.nemustech.tiffany.holder.TFHolder;
+import com.nemustech.tiffany.holder.TFHolder.OnMoveListener;
+import com.nemustech.tiffany.holder.TFHolderLayout;
+import com.nemustech.tiffany.holder.TFHolderOnTouchListener;
+import com.nemustech.tiffany.holder.TFItemLayout;
+import com.nemustech.tiffany.layer.TFCameraLayer;
+import com.nemustech.tiffany.math.TFVector3;
+import com.nemustech.tiffany.model.TFPanel;
+import com.nemustech.tiffany.texture.TFBitmapLoader;
+import com.nemustech.tiffany.texture.TFTexManager;
+import com.nemustech.tiffany.texture.TFTexObject;
+
+import jp.co.nttdocomo.ebook.Constants;
+import jp.co.nttdocomo.ebook.EbookApplication;
+import jp.co.nttdocomo.ebook.R;
+import jp.co.nttdocomo.ebook.Util;
+
+public class CoverflowManager {
+	private static final boolean DEBUG = true;
+
+	private static final String TAG = "CoverflowManager";
+	
+	private static final int LEFT = 0;
+	private static final int CENTER = 1;
+	private static final int RIGHT = 2;
+
+	private static final float PHONE_COVER_RATIO = 1.5625f;
+	private static final float TABLET_COVER_RATIO = 1.587f;
+	private static final float PHONE_TEXT_RATIO = 0.1578f;
+	private static final float TABLET_TEXT_RATIO = 0.1689f;
+	public static float COVER_RATIO = !EbookApplication.isScreenLarge() ? PHONE_COVER_RATIO : TABLET_COVER_RATIO;
+	public static float TEXT_RATIO = !EbookApplication.isScreenLarge() ? PHONE_TEXT_RATIO : TABLET_TEXT_RATIO;
+
+	public static final int COVERFLOW_ITEM_MAX = Constants.COVERFLOW_ITEM_COUNT;
+	public static final int NONE_ITEM_PANEL = 2;
+
+	private TFWorld mWorld;
+	private TFHolder mHolder;
+	private CoverFlowInfo mCoverFlowInfo;
+	private float mStartX;
+	private int mTouchSlop;
+	private int mMargin;
+
+	private Context mContext;
+	private View mGLView;
+
+	private static SparseArray<ItemInfo> mItemInfoArray;
+	private static SparseArray<Bitmap> mTextBitmap;
+
+	private static CoverflowManager sInstance;
+
+	private boolean mIsEmpty = false;
+
+	private HolderReadyCallback mHolderReadyCallback;
+	public interface HolderReadyCallback {
+		public void onCoverflowReady();
+	}
+	
+	public void setHolderReadyCallback(HolderReadyCallback callback) {
+		mHolderReadyCallback = callback;
+	}
+
+	private OnCoverflowItemClickListener mOnCoverflowItemClickListener;
+
+	public interface OnCoverflowItemClickListener {
+		/**
+		 * Called when an item on CoverFlowview has been clicked.
+		 * @param v The view that was clicked.
+		 */
+		void onCoverflowItemClick(Long titleId, String contentsId);
+	}
+
+	public class ItemInfo {
+		public long titleId;
+		public String contentId;
+		public boolean isSample;
+		public int textResourceId;
+
+		public void updateObject(Bitmap bitmap) {
+			synchronized (mWorld.getLockObject()) {
+				int index = indexOfIteminfo(this);
+				CustomObjectGroup group = null;
+				try {
+					group = (CustomObjectGroup) mHolder.get(index);
+				} catch (IndexOutOfBoundsException e) {
+					updateObjectCount();
+					group = (CustomObjectGroup) mHolder.get(index);
+				}
+				updateCoverTexName(group, bitmap);
+				updateTextTexName(group);
+			}
+		}
+
+		public void updateCoverTexName(CustomObjectGroup group, Bitmap bitmap) {
+			synchronized (mWorld.getLockObject()) {
+				if (bitmap == null)
+					return;
+				TFTexManager texManager = mWorld.getTexManager();
+				TFBitmapLoader texLoader = new TFBitmapLoader(bitmap);
+				String userKey = Long.toString(titleId);
+				CoverTexObject texObject = new CoverTexObject(texManager, texLoader);
+				texObject.setUserKey(userKey);
+				texObject.requestUpdate();
+				group.setCoverTexture(texObject);
+				group.resizeCoverPanel(texObject, mCoverFlowInfo.getCoverPanelWidth(),
+						mCoverFlowInfo.getCoverPanelHeight());
+				texManager.putTexObject(userKey, texObject);
+			}
+			mWorld.requestRender();
+		}
+
+		public void updateTextTexName(CustomObjectGroup group) {
+			TFTexObject texObject;
+			switch (textResourceId) {
+			case R.drawable.text_free_bg_sp:
+			case R.drawable.text_free_bg_tab:
+			case R.drawable.text_recommendation_bg_sp:
+			case R.drawable.text_recommendation_bg_tab:
+				synchronized (mWorld.getLockObject()) {
+					texObject = createTextTexObject(getContext().getResources(), mWorld, textResourceId, EbookApplication.isScreenLandscape(getContext()));
+				}
+				texObject.requestUpdate();
+				break;
+			default:
+				texObject = null;
+				break;
+			}
+			group.setTextTexture(texObject);
+			mWorld.requestRender();
+		}
+	}
+
+	public static CoverflowManager getInstance(Context context) {
+		if(sInstance == null) {
+			sInstance = new CoverflowManager(context);
+		}
+		return sInstance;
+	}
+
+	private CoverflowManager(Context context) {
+		mContext = context;
+		mTouchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+
+		mItemInfoArray = new SparseArray<ItemInfo>();
+		mTextBitmap = new SparseArray<Bitmap>();
+	}
+
+	private Context getContext() {
+		return mContext;
+	}
+
+	public OnCoverflowItemClickListener getOnCoverflowItemClickListener() {
+		return mOnCoverflowItemClickListener;
+	}
+
+	public void setOnCoverflowItemClickListener(OnCoverflowItemClickListener l) {
+		mOnCoverflowItemClickListener = l;
+	}
+
+	public TFWorld getWorld() {
+		return mWorld;
+	}
+
+	public void setCoverFlowInfo(CoverFlowInfo info) {
+		mCoverFlowInfo = info;
+	}
+
+	public void setGLView(View view) {
+		mGLView = view;
+		if (mWorld == null) {
+			mWorld = createWorld(getContext());
+			if (DEBUG) Log.d(TAG, "TFWorld has been created");
+		}
+		assignViewToWorld(view, getWorld());
+		if (DEBUG) Log.d(TAG, "View(" + view + ") has been assigned to world (" + getWorld() + ")");
+	}
+
+	public boolean isReady() {
+		return (mHolder == null) ? false : true;
+	}
+
+	public int getTouchSlop() {
+		return mTouchSlop;
+	}
+
+	public void performCoverflowItemClickListener(ItemInfo info) {
+		if (mOnCoverflowItemClickListener != null) {
+			mOnCoverflowItemClickListener.onCoverflowItemClick(info.titleId, info.contentId);
+		}
+	}
+
+	public ItemInfo getItemInfo(int index) {
+		return mItemInfoArray.get(index);
+	}
+
+	public int indexOfIteminfo(ItemInfo info) {
+		return mItemInfoArray.indexOfValue(info);
+	}
+
+	public int findIndexForContent(long titleId, String contentId, boolean sample) {
+		synchronized (mWorld.getLockObject()) {
+			if(mItemInfoArray != null) {
+				for(int i = 0 ; i < mItemInfoArray.size() ; i++) {
+					ItemInfo info = mItemInfoArray.get(i);
+					if(sample) {
+						if(info.titleId == titleId && info.isSample == sample)
+							return i;
+					} else {
+						if(info.titleId == titleId && info.contentId.equals(contentId) && info.isSample == sample)
+							return i;
+					}
+				}
+			}
+		}
+		return -1;
+	}
+
+	public void requestHideCoverflow() {
+		synchronized (mWorld.getLockObject()) {
+			int count = mHolder.getCount();
+			for (int i = 0; i < count; i++) {
+				removeCustomObjectGroup(0);
+			}
+		}
+		mWorld.getFogManager().setEnableFog(false);
+		mWorld.requestRender();
+		mIsEmpty = true;
+	}
+
+	public void updateItemInfo(int index, long titleId, String contentId, boolean sample, int textResourceId) {
+		android.util.Log.d("hsw_dbg", " updateItemInfo");
+		synchronized (mWorld.getLockObject()) {
+			ItemInfo info = mItemInfoArray.get(index);
+			if (info == null) {
+				info = new ItemInfo();
+				mItemInfoArray.put(index, info);
+			}
+
+			info.contentId = contentId;
+			info.titleId = titleId;
+			info.isSample = sample;
+			info.textResourceId = textResourceId;
+
+			updateObjectCount();
+
+			info.updateObject(Util.getTitleImage(getContext(), info.titleId, info.contentId));
+		}
+	}
+
+	public void clearItemInfo() {
+		synchronized (mWorld.getLockObject()) {
+			if(mItemInfoArray != null)
+				mItemInfoArray.clear();
+		}
+	}
+
+	public void removeItemInfo() {
+		synchronized (mWorld.getLockObject()) {
+			if(mItemInfoArray != null)
+				mItemInfoArray.remove(mItemInfoArray.size() - 1);
+		}
+	}
+
+	private void updateObjectCount() {
+		synchronized (mWorld.getLockObject()) {
+			// set the count of panels
+			int diff = mItemInfoArray.size() - mHolder.getCount();
+			if (diff > 0) {
+				for (int i = 0; i < diff; i++) {
+					addCustomObjectGroup(EbookApplication.isScreenLandscape(getContext()));
+				}
+			} else if (diff < 0) {
+				int count = Math.abs(diff);
+				for (int i = 0; i < count; i++) {
+					int removedIndex = mHolder.getCount() - 1;
+					removeCustomObjectGroup(removedIndex);
+				}
+			}
+
+			int count = mHolder.getCount();
+			switch (count) {
+			case 3:
+				mHolder.setBoundsOfHeadItem(1, 1);
+				mHolder.setDeviation(0.0f);
+				break;
+			case 4:
+				mHolder.setBoundsOfHeadItem(1, 2);
+				mHolder.setDeviation(0.0f);
+				break;
+			default:
+				mHolder.resetBoundsOfHeadItem();
+				mHolder.setDeviation(0.0f);
+				break;
+			}
+		}
+	}
+
+	private void addCustomObjectGroup(boolean isLandscape) {
+		mHolder.add(new CustomObjectGroup(mCoverFlowInfo, isLandscape));
+	}
+
+	private void removeCustomObjectGroup(int index) {
+		removeCustomObjectGroup((CustomObjectGroup) mHolder.get(index));
+	}
+
+	private void removeCustomObjectGroup(CustomObjectGroup object) {
+		mHolder.remove(object);
+	}
+
+	private TFWorld createWorld(Context context) {
+		TFWorld world = new CoverflowTFWorld(context);
+		WorldListener worldListener = new WorldListener();
+		world.setOnWorldCreatedListener(worldListener);
+		world.setOnWorldResizedListener(worldListener);
+		return world;
+	}
+
+	private void assignViewToWorld(View view, TFWorld world) {
+		if (view instanceof GLSurfaceView) {
+			GLSurfaceView glView = (GLSurfaceView) view;
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+				glView.setEGLConfigChooser(8, 8, 8, 8, 0, 0);
+			}
+			world.setGLView((GLSurfaceView) view);
+		} else if (view instanceof RendererTextureView) {
+			world.setGLViewAdapter(new TextureViewAdapter(world, (RendererTextureView) view));
+		} else {
+			throw new IllegalArgumentException("Unsupported view : "+ view);
+		}
+	}
+
+	private float calcCoverPanelWidth() {
+		int widthPixels = mContext.getResources().getDisplayMetrics().widthPixels;
+		int screenWidth = mCoverFlowInfo.getScreenWidth(EbookApplication.isScreenLarge(), EbookApplication.isScreenLandscape(mContext));
+		int screenHeight = mCoverFlowInfo.getScreenHeight(EbookApplication.isScreenLarge());
+		int panelWidth = mCoverFlowInfo.getPanelWidth(EbookApplication.isScreenLarge());
+		float widthRatio = (float) mGLView.getWidth() / screenWidth;
+		float heightRatio = (float) mGLView.getHeight() / screenHeight;
+		float ratio = widthRatio > heightRatio ? heightRatio : widthRatio;
+		int panelSize = (int) (ratio * panelWidth);
+		int start = (int) (widthPixels / 2 - panelSize / 2);
+		return getStartX(LEFT, start, 0, 0, mCoverFlowInfo.getEndZ()) * -2.0f;
+	}
+
+	private float getStartX(int position, int start) {
+		return getStartX(position, start, mMargin);
+	}
+
+	private float getStartX(int position, int start, int margin) {
+		return getStartX(position, start, margin, mCoverFlowInfo.getLeaningAngle(), mCoverFlowInfo.getStartZ());
+	}
+
+	private float getStartX(int position, int start, int margin, float angle, float startZ) {
+		float x2d = margin + start;
+		float y2d = mGLView.getHeight() / 2.0f;
+		float[] hitTestLine = new float[8];
+		mWorld.getProjection().getHitTestLine(x2d, y2d, hitTestLine, 0);
+
+		float deltaX = hitTestLine[4 + 0] - hitTestLine[0];
+		float deltaZ = hitTestLine[4 + 2] - hitTestLine[2];
+		float z = (float) (startZ + mCoverFlowInfo.getCoverPanelWidth() * 0.5f
+				* Math.sin(Math.toRadians(angle)));
+		z -= mWorld.getLayer(0).getLocation(TFVector3.Z);
+		float factor = (z - hitTestLine[2]) / deltaZ;
+		float x = hitTestLine[0] + deltaX * factor;
+		float scale = (float)position * 0.5f;
+		return (float) (x + mCoverFlowInfo.getCoverPanelWidth() * scale
+				* Math.cos(Math.toRadians(angle)));
+	}
+
+	private int getMargin(int start) {
+		float x = getStartX(RIGHT, start);
+		float y = 0;
+		float z = (float) (mCoverFlowInfo.getStartZ() - mCoverFlowInfo.getCoverPanelWidth() * 0.5f
+					* Math.sin(Math.toRadians(mCoverFlowInfo.getLeaningAngle())));
+		float[] objectCoord = {x, y, z, 1.0f};
+		float[] eyeCoord = new float[4];
+		float[] screenCoord = new float[4];
+
+		TFProjection projection = mWorld.getProjection();
+		mHolder.convertObjectToEyeCoord(eyeCoord, 0, objectCoord, 0);
+		projection.convertEyeToScreenCoord(screenCoord, 0, eyeCoord, 0);
+
+		return (int) screenCoord[0];
+	}
+
+	private void setHolderPosition() {
+		float[] position = mCoverFlowInfo.getHolderLayoutPosition();
+		int margin = 0;
+		int nextMargin = 0;
+
+		for (int i = 0; i < position.length / 2 - 1; i++) {
+			nextMargin = getMargin(margin);
+			position[i] = getStartX(CENTER, nextMargin);
+			position[position.length - 1 - i] = -position[i];
+			margin = nextMargin;
+		}
+		nextMargin = getMargin(margin);
+		DisplayMetrics metrics = getContext().getResources().getDisplayMetrics();
+		int widthPixels = metrics.widthPixels;
+		int area = widthPixels / 2 - nextMargin;
+
+		int panelSize = (int) (widthPixels * getPanelSize() / mCoverFlowInfo.getFocalWidth());
+		int gap = (area - (int)(panelSize * 1.5f)) / 2;
+
+		position[position.length / 2 - 1] = getStartX(CENTER, nextMargin, gap, 0, mCoverFlowInfo.getEndZ());
+		position[position.length / 2 + 1] = -position[position.length / 2 - 1];
+	}
+
+	private float getPanelSize() {
+		TFProjection projeciton = mWorld.getProjection();
+		return (projeciton.getFocalDistance() + mCoverFlowInfo.getEndZ()) * mCoverFlowInfo.getCoverPanelWidth() / projeciton.getFocalDistance();
+	}
+
+	public Pointer createPointer(float x, float y) {
+		return new Pointer(x, y);
+	}
+
+	private void setHolderLayout(int count, boolean isLandscape) {
+		mStartX = getStartX(CENTER, 0);
+		TFHolderLayout holderLayout ;
+		if (EbookApplication.isScreenLarge() && isLandscape) {
+			float[] position = {
+					3.229f, 2.176f, 0.9520f,
+					0.0f,
+					-0.9520f, -2.176f, -3.229f
+			};
+			holderLayout = getHolderLayoutByTablet(0, position,
+					mCoverFlowInfo.getStartZ(), mCoverFlowInfo.getEndZ(),
+					position.length - 2, mCoverFlowInfo.getNonLeaningCount());
+		} else {
+			setHolderPosition();
+			holderLayout = getHolderLayout(mCoverFlowInfo.getCoverPanelWidth(),
+					mCoverFlowInfo.getLeaningAngle(), mCoverFlowInfo.getHolderLayoutPosition(),
+					mStartX, mCoverFlowInfo.getStartZ(), mCoverFlowInfo.getEndZ(),
+					count, mCoverFlowInfo.getNonLeaningCount());
+		}
+		holderLayout.setHeadItemLayoutIndex(count / 2);
+		setOpacity(holderLayout, count / 2, 3);
+		mHolder.setHolderLayout(holderLayout);
+	}
+
+	private TFHolderLayout getHolderLayoutByTablet(float leaningAngle, float[] position, float startZ, float endZ, int itemLayoutCount, int nonLeaningCount) {
+		TFHolderLayout holderLayout = new TFHolderLayout();
+		int middleIndex = itemLayoutCount / 2;
+		TFItemLayout itemLayout;
+		int index = 0;
+
+		itemLayout = holderLayout.getOutroItemLayout(0);
+		itemLayout.setLocation(0.0f, position[index], startZ);
+		itemLayout.setOrientationEuler(0f, leaningAngle, 0f);
+		for (; index < middleIndex - (nonLeaningCount * 0.5f); index++) {
+			itemLayout = new TFItemLayout();
+			itemLayout.setLocation(0f, position[index + 1], startZ);
+			itemLayout.setOrientationEuler(0f, leaningAngle, 0f);
+			holderLayout.add(itemLayout);
+		}
+		for (; index < middleIndex + (nonLeaningCount * 0.5f); index++) {
+			itemLayout = new TFItemLayout();
+			itemLayout.setLocation(0f, position[index + 1], endZ);
+			holderLayout.add(itemLayout);
+		}
+		for (;  index < itemLayoutCount; index++) {
+			itemLayout = new TFItemLayout();
+			itemLayout.setLocation(0f, position[index + 1], startZ);
+			itemLayout.setOrientationEuler(0f, -leaningAngle, 0f);
+			holderLayout.add(itemLayout);
+		}
+		itemLayout = holderLayout.getOutroItemLayout(1);
+		itemLayout.setLocation(0.0f, position[index + 1], startZ);
+		itemLayout.setOrientationEuler(0f, -leaningAngle, 0f);
+
+		return holderLayout;
+	}
+
+	private TFHolderLayout getHolderLayout(float panelSize, float leaningAngle, float[] position, float startX, float startZ, float endZ, int itemLayoutCount, int nonLeaningCount) {
+		TFHolderLayout holderLayout = new TFHolderLayout();
+		int middleIndex = itemLayoutCount / 2;
+		TFItemLayout itemLayout;
+		int index = 0;
+
+		itemLayout = holderLayout.getOutroItemLayout(0);
+		itemLayout.setLocation(mStartX - panelSize * 1.1f, 0.0f, 0.0f);
+		itemLayout.setOrientationEuler(0f, leaningAngle, 0f);
+		for (; index < middleIndex - (nonLeaningCount * 0.5f); index++) {
+			itemLayout = new TFItemLayout();
+			itemLayout.setLocation(index - 1 < 0 ? mStartX : position[index -1], 0f, startZ);
+			itemLayout.setOrientationEuler(0f, leaningAngle, 0f);
+			holderLayout.add(itemLayout);
+		}
+		for (; index < middleIndex + (nonLeaningCount * 0.5f); index++) {
+			itemLayout = new TFItemLayout();
+			itemLayout.setLocation(position[index - 1], 0f, endZ);
+			holderLayout.add(itemLayout);
+		}
+		for (;  index < itemLayoutCount; index++) {
+			itemLayout = new TFItemLayout();
+			itemLayout.setLocation(index - 1 > position.length - 1 ? -mStartX : position[index - 1], 0f, startZ);
+			itemLayout.setOrientationEuler(0f, -leaningAngle, 0f);
+			holderLayout.add(itemLayout);
+		}
+		itemLayout = holderLayout.getOutroItemLayout(1);
+		itemLayout.setLocation(-mStartX + panelSize * 1.1f, 0.0f, 0.0f);
+		itemLayout.setOrientationEuler(0f, -leaningAngle, 0f);
+
+		return holderLayout;
+	}
+
+	private void setOpacity(TFHolderLayout holderLayout, int middleIndex, int nonLeaningCount) {
+		final float outroOpacity = 0.0f;
+		int count = holderLayout.getItemLayoutCount();
+
+		TFItemLayout itemLayout;
+		itemLayout = holderLayout.getOutroItemLayout(0);
+		itemLayout.setOpacity(outroOpacity);
+		int index = 0;
+		for (; index < middleIndex - (nonLeaningCount * 0.5f); index++) {
+			itemLayout = holderLayout.getItemLayout(index);
+			itemLayout.setOpacity(0.5f);
+		}
+		for (; index < middleIndex + (nonLeaningCount * 0.5f); index++) {
+			itemLayout = holderLayout.getItemLayout(index);
+			itemLayout.setOpacity(1.0f);
+		}
+		for (; index < count; index++) {
+			itemLayout = holderLayout.getItemLayout(index);
+			itemLayout.setOpacity(0.5f);
+		}
+		itemLayout = holderLayout.getOutroItemLayout(1);
+		itemLayout.setOpacity(outroOpacity);
+	}
+
+	private TFTexObject createTextTexObject(Resources resources, TFWorld world, int resourceId, boolean isLandscape) {
+		Bitmap textBitmap;
+		if (EbookApplication.isScreenLarge() && isLandscape) {
+			textBitmap = getTextBitmap(-resourceId);
+		} else {
+			textBitmap = getTextBitmap(resourceId);
+		}
+		if (textBitmap == null) {
+			textBitmap = createTextBitmap(resources, resourceId, isLandscape);
+			if (EbookApplication.isScreenLarge() && isLandscape) {
+				putTextBitmap(-resourceId, textBitmap);
+			} else {
+				putTextBitmap(resourceId, textBitmap);
+			}
+		}
+		TFTexObject textTexObject;
+		synchronized (world.getLockObject()) {
+			textTexObject = world.getTexManager().createTexObject(textBitmap);
+		}
+		return textTexObject;
+	}
+
+	private Bitmap getTextBitmap(int resourceId) {
+		return mTextBitmap.get(resourceId);
+	}
+
+	private void putTextBitmap(int resourceId, Bitmap bitmap) {
+		mTextBitmap.put(resourceId, bitmap);
+	}
+
+	private Bitmap createTextBitmap(Resources resources, int resourceId, boolean isLandscape) {
+		Bitmap beRecycled = BitmapFactory.decodeResource(resources, resourceId);
+		int width = beRecycled.getWidth();
+		int height = beRecycled.getHeight();
+		Bitmap res = Bitmap.createBitmap(width, height, Config.ARGB_8888);
+		Canvas canvas = new Canvas(res);
+		Paint paint = new Paint();
+		if (EbookApplication.isScreenLarge() && isLandscape) {
+			paint.setColor(0xBF000000);
+		} else {
+			paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+		}
+		canvas.drawRect(0, 0, width, height, paint);
+		canvas.drawBitmap(beRecycled, 0, 0, null);
+		beRecycled.recycle();
+		return res;
+	}
+
+	private class CoverFlowOnTouchListener extends TFHolderOnTouchListener {
+
+		private float mAccumStep;
+		private int mStartHeadItemIndex;
+		private int mDownTime;
+
+		private boolean mMoveLock;
+		private Pointer mDownPointer;
+
+		@Override
+		protected void handleDown(TFITouchable touchable, TFObject object,
+				MotionEvent event) {
+			super.handleDown(touchable, object, event);
+			mDownTime = (int) SystemClock.uptimeMillis();
+			mStartHeadItemIndex = ((TFHolder)object).getHeadItemIndex();
+			mAccumStep = 0;
+			mDownPointer = new Pointer(event.getX(), event.getY());
+			mMoveLock = true;
+		}
+
+		@Override
+		protected void handleMove(TFITouchable touchable, TFObject object, MotionEvent event) {
+			Pointer pointer = new Pointer(event.getX(), event.getY());
+			if (getPointerDistanceSqured(mDownPointer, pointer) > mTouchSlop) {
+				mMoveLock = false;
+			}
+			if (!mMoveLock) {
+				super.handleMove(touchable, object, event);
+				mAccumStep += mStep;
+				if (Math.abs(mAccumStep) > 0.3f)
+					mGLView.getParent().requestDisallowInterceptTouchEvent(true);
+			}
+		}
+
+		@Override
+		protected void handleUp(TFITouchable touchable, TFObject object, MotionEvent event) {
+			TFHolder holder = (TFHolder)object;
+			int upTime = (int) SystemClock.uptimeMillis();
+			if (upTime - mDownTime < 200) {
+				int itemIndex = 0;
+				if (Math.abs(mAccumStep) > 0.7f) {
+					itemIndex = mAccumStep > 0 ? 3 : -3;
+					mStartHeadItemIndex += (int)mAccumStep / 3 * 3;
+					holder.setHeadItemIndex(mStartHeadItemIndex + itemIndex, 150);
+					mAccumStep = 0;
+					return;
+				}
+			}
+
+			// to shift next item if step more than 0.4
+			int currentHeadItemIndex = holder.getHeadItemIndex();
+			float fraction = mAccumStep - (int) mAccumStep;
+			if (fraction > 0.3f && fraction < 0.5f) {
+				holder.setHeadItemIndex(currentHeadItemIndex + 1, true);
+			} else if (fraction < -0.3f && fraction > -0.5f) {
+				holder.setHeadItemIndex(currentHeadItemIndex - 1, true);
+			} else {
+				holder.setHeadItemIndex(currentHeadItemIndex, true);
+			}
+
+			mAccumStep = 0;
+			mDownPointer = null;
+			mMoveLock = true;
+		}
+
+		private float getPointerDistanceSqured(Pointer pointer1, Pointer pointer2) {
+			float diffX = pointer2.x - pointer1.x;
+			float diffY = pointer2.y - pointer1.y;
+			return diffX * diffX + diffY * diffY;
+		}
+	}
+
+	public class Pointer {
+		float x;
+		float y;
+
+		public Pointer(float x, float y) {
+			this.x = x;
+			this.y = y;
+		}
+	}
+
+	private class WorldListener implements OnWorldCreatedListener, OnWorldResizedListener, OnPostDrawListener {
+
+		@Override
+		public void onWorldCreated(TFWorld world) {
+			world.setDepthTest(false);
+			if (EbookApplication.isScreenLarge()) {
+				world.getBackgroundColor().set(0.1217f, 0.1217f, 0.1217f, 1.0f);
+			} else {
+				world.getBackgroundColor().set(0.07451f, 0.07451f, 0.07451f, 1.0f);
+			}
+			world.getProjection().set(2.0f, 10.0f, mCoverFlowInfo.getFocalPosition(), mCoverFlowInfo.getFocalWidth());
+			world.getProjection().updateProjectionMatrix();
+			world.setOnPostDrawListener(this);
+
+			TFCameraLayer cameraLayer = new TFCameraLayer(world);
+			world.addLayer(cameraLayer);
+
+			world.getFogManager().setEnableFog(true);
+			TFLinearFog fog = (TFLinearFog) world.getFogManager().createFog(TFFogManager.LINEAR);
+			fog.setStart(-0.2f);
+			fog.setEnd(EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(getContext()) ? -0.8f : -0.34f);
+			fog.getColor().set(0.0f, 0.0f, 0.0f, 1.0f);
+
+			mHolder = new TFHolder();
+			mHolder.setLocation(0.0f, -0.03f, 0.0f);
+			mHolder.setIsWraparound(true);
+			mHolder.setOnMoveListener(new OnMoveListener() {
+
+				@Override
+				public void onMove(TFHolder holder, float step) {
+					mCoverFlowInfo.setHeadItemIndex(holder.getHeadItemIndex());
+				}
+			});
+			mHolder.setOnTouchListener(new CoverFlowOnTouchListener());
+			world.getLayer(0).add(mHolder);
+
+			if (DEBUG) Log.d(TAG, "World has been created.");
+		}
+
+		@Override
+		public void onWorldResized(TFWorld world, int width, int height) {
+			TFProjection projection = world.getProjection();
+			projection.set(2.0f, 10.0f, mCoverFlowInfo.getFocalPosition(), mCoverFlowInfo.getFocalWidth());
+			world.getLayer(0).setLocation(0.0f, 0.0f, projection.getFocalDistance());
+			world.setOnPostDrawListener(this);
+
+			TFLinearFog fog = (TFLinearFog) world.getFogManager().getFog();
+			fog.setEnd(EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(getContext()) ? -0.8f : -0.34f);
+
+			int count = mHolder.getCount();
+			for (int i = 0; i < count; i++) {
+				((CustomObjectGroup) mHolder.get(i)).setCoverTexture(null);
+				((CustomObjectGroup) mHolder.get(i)).setTextTexture(null);
+			}
+
+			if (DEBUG) Log.d(TAG, "World has been resized.");
+		}
+
+		@Override
+		public void onPostDraw(TFWorld world) {
+			if(mHolderReadyCallback != null)
+				mHolderReadyCallback.onCoverflowReady();
+
+			boolean isLandscape = EbookApplication.isScreenLandscape(getContext());
+			boolean isLargeScreen = EbookApplication.isScreenLarge();
+
+			// holder layout
+			if (!isLargeScreen || !isLandscape) {
+				float width = calcCoverPanelWidth();
+				if (width > 0) {
+					float ratio = COVER_RATIO;
+					mCoverFlowInfo.setCoverPanelWidth(width);
+					mCoverFlowInfo.setCoverPanelHeight(width * ratio); // This value is ratio about panel
+					mCoverFlowInfo.setTextPanelWidth(width);
+					mCoverFlowInfo.setTextPanelHeight(mCoverFlowInfo.getCoverPanelHeight() * TEXT_RATIO);
+				}
+			}
+
+			int itemCount = mHolder.getCount();
+			
+			android.util.Log.e(TAG, "[RIG] itemCount : " + itemCount + ", mIsEmpty : " + mIsEmpty);
+			
+			if (itemCount == 0) {
+				if(!mIsEmpty) {
+					for (int i = 0; i < mCoverFlowInfo.getItemCount(); i++) {
+						addCustomObjectGroup(isLandscape);
+					}
+				}
+			} else {
+				float backgroundPanelWidth = mCoverFlowInfo.getBackPanelWidth();
+				float backgroundPanelHeight = mCoverFlowInfo.getBackPanelHeight();
+				float coverPanelWidth = mCoverFlowInfo.getCoverPanelWidth();
+				float coverPanelHeight = mCoverFlowInfo.getCoverPanelHeight();
+				float textPanelWidth = mCoverFlowInfo.getTextPanelWidth();
+				float textPanelHeight = mCoverFlowInfo.getTextPanelHeight();
+				for (int i = 0; i < itemCount; i++) {
+					TFObjectGroup group = (TFObjectGroup) mHolder.get(i);
+					// background panel
+					((TFPanel) group.get(0)).setSize(backgroundPanelWidth, backgroundPanelHeight, 0.0f);
+					// cover panel
+					((TFPanel) group.get(1)).setSize(coverPanelWidth, coverPanelHeight, 0.0f);
+					// text panel
+					TFPanel textPanel = (TFPanel) group.get(2);
+					textPanel.setSize(textPanelWidth, textPanelHeight, 0.0f);
+					if (EbookApplication.isScreenLarge() && isLandscape) {
+						textPanel.setLocation(0.0f, -coverPanelHeight * 0.5f + textPanelHeight * 0.5f, 0.0f);
+					} else {
+						textPanel.setLocation(0.0f, coverPanelHeight * 0.5f + textPanelHeight * 0.7f, 0.0f);
+					}
+				}
+			}
+			int widthPixels = mContext.getResources().getDisplayMetrics().widthPixels;
+			
+			mMargin = (int) (widthPixels * mCoverFlowInfo.getMargin());
+			
+			setHolderLayout(mCoverFlowInfo.getVisibleItemCount(), isLandscape);
+
+			// set previous head item index
+			mHolder.setHeadItemIndex(mCoverFlowInfo.getHeadItemIndex(), false);
+
+//			synchronized (mWorld.getLockObject()) {
+//				if(mItemInfoArray != null) {
+//					int size = mItemInfoArray.size();
+//					// set texture for children
+//					if (size != 0) {
+//						for (int i = 0; i < size; i++) {
+//							int index = mItemInfoArray.keyAt(i);
+//							ItemInfo info = mItemInfoArray.get(index);
+//							info.updateObject(Util.getTitleImage(getContext(), info.titleId, info.contentId));
+//						}
+//					}
+//				}
+//			}
+
+			mWorld.requestRender();
+
+			// clear post draw listener
+			world.setOnPostDrawListener(null);
+
+			if (DEBUG) Log.d(TAG, "World Post Draw Listener has been called.");
+		}
+	}
+}

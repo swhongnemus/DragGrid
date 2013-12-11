@@ -1,0 +1,1923 @@
+package jp.co.nttdocomo.ebook;
+
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Context;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Message;
+import android.provider.BaseColumns;
+import android.support.v4.app.FragmentActivity;
+import android.support.v4.content.LocalBroadcastManager;
+import android.util.Log;
+
+import com.nemustech.widget.tf.CoverflowManager;
+import com.nemustech.widget.tf.CoverflowManager.HolderReadyCallback;
+
+import jp.co.nttdocomo.ebook.EbookSettings.BaseEbookColumns;
+import jp.co.nttdocomo.ebook.EbookSettings.Contents;
+import jp.co.nttdocomo.ebook.EbookSettings.DownloadQueue;
+import jp.co.nttdocomo.ebook.EbookSettings.Sample;
+import jp.co.nttdocomo.ebook.EbookSettings.Title;
+import jp.co.nttdocomo.ebook.server.CoverflowSync;
+import jp.co.nttdocomo.ebook.server.DownloadTask;
+import jp.co.nttdocomo.ebook.server.GetItemName;
+import jp.co.nttdocomo.ebook.server.GetNotPurchasedInfo;
+import jp.co.nttdocomo.ebook.server.HttpCommunicationService;
+import jp.co.nttdocomo.ebook.server.IServerResponseCallback;
+import jp.co.nttdocomo.ebook.server.ImeiRegister;
+import jp.co.nttdocomo.ebook.server.ImeiVerify;
+import jp.co.nttdocomo.ebook.server.ServerInterface;
+import jp.co.nttdocomo.ebook.server.ServerResult;
+import jp.co.nttdocomo.ebook.server.ServerTask;
+import jp.co.nttdocomo.ebook.server.SyncOneBook;
+import jp.co.nttdocomo.ebook.server.SyncOneBook.MoveToState;
+import jp.co.nttdocomo.ebook.server.ThumbnailDownload;
+import jp.co.nttdocomo.ebook.viewer.ViewerMenuDefaultFragment.MenuCallback;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class EbookModel implements IServerResponseCallback, HolderReadyCallback {
+	
+	private static final String TAG = "EbookModel";
+
+	private boolean mGetNotPurchasedFlag = true;
+	
+	private Object mTitleListLock = new Object();
+	private List<TitleInfo> mAllTitleList;
+	private List<TitleInfo> mDownloadTitleList;
+	private List<TitleInfo> mNotPurchasedInfoList;
+	private List<TitleInfo> mDeleteList;
+	private List<SampleInfo> mSamples;
+	private ContentInfo mTempSampleInfo;
+	private ContentInfo mTempBGDownloadContentInfo;
+	private Intent mBSKomaNextContentInfo;
+	
+	private Context mContext;
+	private boolean mIsLoaderFinished = false;
+	private ServerTask<?> mNextTask = null;
+	private Handler mHandler = new Handler();
+
+	private String mBanner = null;
+	private List<ModelDataObserver> mObserver = null;
+
+	private ServerTask<?> mPendingServerTask;
+	private ServerTask<?> mPendingViewerServerTask;
+	
+	private Intent mPendingLocalIntent;
+	public enum ActionState {NORMAL, PENDING, DROP};
+	private ActionState mActionState;
+	private ActionState mViewerActionState;
+	
+	public enum CoverflowMode {RECOMMENDS, TITLES};
+	private CoverflowMode mCoverflowMode = CoverflowMode.RECOMMENDS;
+	private boolean mCoverFlowReady = false;
+	private boolean mPendingUpdateCoverFlow = false;
+	private Message mUpdateInfo;
+	
+	private ArrayList<CoverFlowImageData> mRecommendations;
+	
+	private boolean mNeedNewItemBlink = false;
+    private int mLastImeiProcessed = -1;
+
+    private String mWaitingDownloadItems;
+    private CancelableRunnable mCurrentRunnable;
+    private Intent mPendingStartViewerIntent;
+
+    private int mBookmarkPendingTitle = -1;
+    private int mBookmarkPendingContent = -1;
+
+	private SampleComparator mSampleComparator = new SampleComparator();
+	private class SampleComparator implements Comparator<SampleInfo> {
+		@Override
+		public int compare(SampleInfo lhs, SampleInfo rhs) {
+			if(lhs.downloadDate > rhs.downloadDate)
+				return -1;
+			else
+				return 1;
+		}
+	}
+
+	private class CoverFlowImageData {
+		long titleId;
+		boolean isSample;
+
+		CoverFlowImageData(long t, boolean s) {
+			titleId = t;
+			isSample = s;
+		}
+
+		public String toString() {
+			return new String("CoverFlowImageData: titleId=" + titleId
+					+ ", isSample=" + isSample);
+		}
+	}
+
+	public interface ModelDataObserver {
+		public void onChanged();
+	}
+
+	/**
+	 * Thread for Thumbnail download
+	 */
+    private static final DeferredPriorityHandler sBackgroundWorker = new DeferredPriorityHandler("hondana-loader");
+    static {
+    	sBackgroundWorker.start();
+    }
+
+    /**
+     * Thread for Bookshelf UI
+     */
+	private static final DeferredPriorityHandler sForegroundWorker = new DeferredPriorityHandler("hondana-decoder");
+    static {
+        sForegroundWorker.start();
+    }
+
+    /**
+     * Thread for DB
+     */
+	private static final HandlerThread sDatabaseThread = new HandlerThread("hondana-database");
+    static {
+    	sDatabaseThread.start();
+    }
+    private static final Handler sDatabaseWorker = new Handler(sDatabaseThread.getLooper());
+
+    // Tasks to cancel
+    private static final ExecutorService sExecutor = Executors.newFixedThreadPool(1);
+    private static DownloadTask sDownloadTask = null;
+
+    public static void execForegroundDownload(DownloadTask task) {
+    	if(sDownloadTask != null) {
+    		ContentInfo newInfo = task.getContentInfo();
+    		ContentInfo oldInfo = sDownloadTask.getContentInfo();
+    		if(newInfo != null && oldInfo != null && newInfo.equals(oldInfo)) {
+    			if(!newInfo.isSample && !oldInfo.isSample) {
+    				// Sample can be downloaded several times in row.
+    				return;
+    			}
+    		}
+    	}
+
+    	sDownloadTask = task;
+    	sExecutor.execute(task);
+    }
+    
+    public static boolean cancelForegroundDownload(boolean keepResourceForBackgroundDownload) {
+    	if(sDownloadTask != null) {
+    		// Prevent deleting downloaded file
+    		sDownloadTask.setKeepResoucesForBackgroundDownload(keepResourceForBackgroundDownload);
+    		
+    		boolean isCancelled = sDownloadTask.cancel(true);
+    		sDownloadTask.cancelDownloadNotification();
+    		sDownloadTask = null;
+    		
+    		return isCancelled;
+    	}
+    	
+    	return true;
+    }
+    
+    public static ContentInfo getForegroundDownloadContentInfo() {
+    	if(sDownloadTask != null) {
+    		return sDownloadTask.getContentInfo();
+    	}
+    	return null;
+    }
+    
+    public static DownloadTask getForegroundDownloadTask() {
+        return sDownloadTask;
+    }
+    
+    public static void clearForegroundDownload() {
+        sDownloadTask = null;
+    }
+    
+    public interface OnLoaderCallback {
+    	public void onLoaderStarted();
+    	public void onLoaderFinished(boolean isNetworkConnected);
+    }
+    
+    public interface OnServerInterfaceCallback {
+    	public void onSyncAllBooksFinished(boolean ignoreError, int errorCode);
+    	public void onSyncOneBookFinished(ContentInfo contentInfo, boolean isMultiDownload, boolean moveToNext);  
+    	public void onGetVersionSuccess(Map<String, String> result);
+    	public void onTitleContentUpdated(long titleId);
+    	public void onIndividualCoverImageDownloadFinished();
+    	public void onIndividualCoverflowImageDownloadFinished(long titleId, String contentId, boolean isSample);
+    	public <T> void onServerTaskFailed(int errorCode, int apiId, T content, boolean ignoreError);
+    	public void onSyncDownloadStatusFinished();
+	    public void onImeiRegisterSuccess(int from);
+	    public void onImeiRegisterFail(int errorCode, int from, boolean ignoreError);
+	    public void onImeiRegisterCancel(int from);
+		public void onSuccessImeiReplace(int from);
+	    public void onBookShelfDelete();
+		public void onClickImeiOk();
+		public void onClickImeiCancel();
+		public void onClickImeiLogin();
+		public void onClickImeiHelp();
+//		public void onFailImeiReplace(int from);
+    }
+	
+    private OnLoaderCallback mLoaderCallback;
+    private OnServerInterfaceCallback mServerCallback;
+    
+    public interface OnViewerServerInterfaceCallback {
+	    public void onImeiRegisterSuccess(int from);
+	    public void onImeiRegisterFail(int errorCode, int from);
+	    public void onImeiRegisterCancel(int from);
+		public void onSuccessImeiReplace(int from);
+		public void onClickImeiOk();
+		public void onClickImeiCancel();
+		public void onClickImeiLogin();
+		public void onClickImeiHelp();
+		public void onSuccessGetFirstItemId(String firstContentId);
+    	public <T> void onServerTaskFailed(int errorCode, int apiId, T content);
+//		public void onFailImeiReplace(int from);
+    }
+    private OnViewerServerInterfaceCallback mViewerServerTaskCallback;
+	
+	public EbookModel(Context context) {
+		mContext = context;
+		mObserver = new ArrayList<ModelDataObserver>();
+		mActionState = ActionState.NORMAL;
+		mViewerActionState = ActionState.NORMAL;
+		
+		CoverflowManager coverflowManager = CoverflowManager.getInstance(context);
+		coverflowManager.setHolderReadyCallback(this);
+
+		if(!EbookProvider.dbInitailized)
+			return;
+	}
+	
+	public void onActionState(ActionState actionState) {
+		mActionState = actionState;
+		
+		if(actionState == ActionState.NORMAL) {
+			executePendingServerTaskFinish();
+			executePendingLocalIntent();
+		}
+	}
+	
+	private void executePendingServerTaskFinish() {
+		if(mPendingServerTask != null) {
+			mHandler.post(new Runnable() {
+				@Override
+				public void run() {
+					if(mPendingServerTask != null) {
+						mPendingServerTask.finish();
+					}
+					mPendingServerTask = null;
+				}
+			});
+		}
+	}
+	
+	public void onViewerActionState(ActionState actionState) {
+		mViewerActionState = actionState;
+		
+		if(actionState == ActionState.NORMAL) {
+			executePendingViewerServerTaskFinish();
+		}
+	}
+	
+	private void executePendingViewerServerTaskFinish() {
+		if(mPendingViewerServerTask != null) {
+			mHandler.post(new Runnable() {
+				@Override
+				public void run() {
+					if(mPendingViewerServerTask != null) {
+						mPendingViewerServerTask.finish();
+					}
+					mPendingViewerServerTask = null;
+				}
+			});
+		}
+	}
+	
+	private void executePendingLocalIntent() {
+		if(mPendingLocalIntent != null) {
+		    final Intent intent = mPendingLocalIntent;
+            mPendingLocalIntent = null;
+		    
+			mHandler.post(new Runnable() {
+				@Override
+				public void run() {
+					final LocalBroadcastManager localBroadcastManager = LocalBroadcastManager.getInstance(mContext);
+					localBroadcastManager.sendBroadcast(intent);
+				}
+			});
+		}
+	}
+
+	public void setPendingLocalIntent(Intent intent) {
+		mPendingLocalIntent = intent;
+	}
+	
+    public void setOnLoaderCallBack(OnLoaderCallback callback) {
+    	mLoaderCallback = callback;
+    }
+    
+    public void setOnServerInterfaceCallback(OnServerInterfaceCallback callback) {
+    	mServerCallback = callback;
+    }
+    
+    public void setOnViewerServerInterfaceCallback(OnViewerServerInterfaceCallback callback) {
+    	mViewerServerTaskCallback = callback;
+    }
+
+    public OnViewerServerInterfaceCallback getOnViewerServerInterfaceCallback() {
+    	return mViewerServerTaskCallback;
+    }
+
+	public boolean loadAllTitles(final boolean isNetworkConnected) {
+		if(mIsLoaderFinished)
+			return true;
+		
+		final ContentResolver cr = mContext.getContentResolver();
+		
+		Runnable work = new Runnable() {
+			@Override
+			public void run() {
+				final Cursor cursorTitle = cr.query(Title.CONTENT_URI, null, null, null, null);
+
+				if(mLoaderCallback != null)
+					mLoaderCallback.onLoaderStarted();
+				// Load title
+				synchronized(mTitleListLock) {
+					mAllTitleList = TitleInfo.fromCursor(cursorTitle);
+				}
+				cursorTitle.close();
+				
+				// Load Contents				
+				synchronized(mTitleListLock) {
+					for(TitleInfo titleInfo : mAllTitleList) {
+						final String titleId = String.valueOf(titleInfo.titleId);
+						final Cursor cursorContents = cr.query(
+								Contents.CONTENT_URI, null, 
+								Title.TITLE_ID + "=?", 
+								new String[]{titleId}, 
+								null);
+						List<ContentInfo> allContents = ContentInfo.fromCursor(cursorContents);
+						
+						ContentInfo newOrNextItem = null;
+						for(ContentInfo contentInfo : allContents) {
+							if(contentInfo.contentsType == Contents.TYPE_CONTENTS_NEW_ITEM) {
+								final Calendar calendar = Calendar.getInstance();
+								final Date currentDate = calendar.getTime();
+								calendar.setTimeInMillis(titleInfo.releaseDate.getTime());
+								calendar.add(Calendar.MONTH, 1);
+								final Date oneMonthNextFromReleaseDate = calendar.getTime();
+								final boolean isNotOver30Days = (oneMonthNextFromReleaseDate.getTime() - currentDate.getTime()) > 0;
+								if(isNotOver30Days) {
+									newOrNextItem = contentInfo;
+									break;
+								} else {
+									newOrNextItem = null;
+								}
+							} else if(contentInfo.contentsType != Contents.TYPE_CONTENTS_NORMAL) {
+								if(titleInfo.getNextOrNewContent() == null) {
+									newOrNextItem = contentInfo;
+								}
+							}
+						}
+						titleInfo.setContents(allContents);
+						if(newOrNextItem != null)
+							titleInfo.setNextOrNewContentInfo(newOrNextItem);
+						else {
+							if(mGetNotPurchasedFlag) {
+								addToNotPurchasedInfo(titleInfo);
+							}
+						}
+						cursorContents.close();
+					}
+					
+					final Cursor downloadCursor = cr.query(
+							DownloadQueue.CONTENT_URI, null, null, null, null); 
+					if(downloadCursor != null) {
+						final List<DownloadQueueInfo> allDownloadQueueInfos = DownloadQueueInfo.fromCursor(downloadCursor);
+						for(DownloadQueueInfo queueInfo : allDownloadQueueInfos) {
+							final ContentInfo foundContent = findContentInfoById(queueInfo.titleId, queueInfo.contentId);
+							if(foundContent != null) {
+								Intent intent = new Intent(mContext, DownloadService.class);
+								intent.putExtra(DownloadService.EXTRA_UPDATE_TASK_INFO, foundContent.id);
+								mContext.startService(intent);
+							}
+						}
+						downloadCursor.close();
+					}
+				}
+
+				notifyDatasetChange();
+				
+				final Cursor sampleCursor = cr.query(Sample.CONTENT_URI, null, null, null,
+						Sample.DL_DATE + " desc");
+				mSamples = SampleInfo.fromCursor(sampleCursor);
+				sampleCursor.close();
+
+				mIsLoaderFinished = true;
+				mGetNotPurchasedFlag = false;
+				if(mLoaderCallback != null)
+					mLoaderCallback.onLoaderFinished(isNetworkConnected);
+			}
+		};
+		
+		runOnForegroundThread(work);
+
+		return false;
+	}
+
+	// Dongwon.kim bookmark migration
+	public List<ContentInfo> getAllContentsNoneThread() {
+		final ContentResolver cr = mContext.getContentResolver();
+
+		final Cursor cursorContents = cr.query(Contents.CONTENT_URI, 
+				null, 
+				Contents.CONTENTS_TYPE + "=?", 
+				new String[]{String.valueOf(Contents.TYPE_CONTENTS_NORMAL)}, 
+				null);
+		
+		List<ContentInfo> allContents = ContentInfo.fromCursor(cursorContents);	
+		cursorContents.close();
+		return allContents;
+	}
+
+	public static void addToDatabase(Context context, final Uri uri, final BaseInfo info) {
+		final ContentResolver cr = context.getContentResolver();
+		final ContentValues contentValues = new ContentValues();
+
+		info.onAddToDatabase(contentValues);
+		contentValues.remove(BaseEbookColumns.ID);
+
+		Runnable work = new Runnable() {
+			@Override
+			public void run() {
+				Uri newUri = cr.insert(uri, contentValues);
+				if(newUri != null) {
+					info.id = Integer.valueOf(newUri.getLastPathSegment());
+				}
+				if(Debug.DEBUG) {
+					if(newUri != null)
+						android.util.Log.d(TAG, " inserted row id = " + info.id);
+				}
+			}
+		};
+
+		runOnDatabaseThread(work);
+	}
+
+	public static void deleteFromDatabase(Context context, final Uri uri, final String where) {
+		final ContentResolver cr = context.getContentResolver();
+		Runnable work = new Runnable() {
+
+			@Override
+			public void run() {
+				int deletedCnt = cr.delete(uri, where, null);
+				//if (Debug.DEBUG)
+					android.util.Log.e(TAG, " deletedCnt = " + deletedCnt);
+			}
+		};
+
+		runOnDatabaseThread(work);
+	}
+
+	public static void deleteFromDatabase(Context context, final Uri uri, final long id) {
+		deleteFromDatabase(context, uri, BaseColumns._ID + " = " + id);
+	}
+
+	public static void clearAllRecords(Context context, final Uri uri) {
+		final ContentResolver cr = context.getContentResolver();
+        
+        Runnable work = new Runnable() {
+			
+			@Override
+			public void run() {
+				int cnt = cr.delete(uri, null, null);
+				if(Debug.DEBUG)
+					android.util.Log.d(TAG, " Status cleared = " + cnt);
+				
+			}
+		};
+        
+		runOnDatabaseThread(work);
+	}
+	
+	public static List<DownloadQueueInfo> queryDownloadQueueInfo(Context context, final long titleId, final String contentId) {
+		final ContentResolver cr = context.getContentResolver();
+		final Cursor cursor = cr.query(DownloadQueue.CONTENT_URI, 
+				null, 
+				DownloadQueue.TITLE_ID + "=? and " + DownloadQueue.CONTENTS_ID + "=?", 
+				new String[]{String.valueOf(titleId), contentId}, 
+				null);
+		
+		return DownloadQueueInfo.fromCursor(cursor);
+	}
+
+	public static void clearAllDownloadingStatus(Context context) {
+		final ContentResolver cr = context.getContentResolver();
+
+		Runnable work = new Runnable() {
+
+			@Override
+			public void run() {
+				final ContentValues statusClearedValues = new ContentValues();
+				DownloadQueueInfo.updateDownloadState(statusClearedValues, DownloadQueue.DL_STATUS_WAIT);
+				int cnt = cr.update(
+						DownloadQueue.CONTENT_URI, 
+						statusClearedValues, 
+						DownloadQueue.DL_STATUS + "!=?", 
+						new String[]{String.valueOf(DownloadQueue.DL_STATUS_WAIT)});
+				
+				if(Debug.DEBUG)
+					android.util.Log.d(TAG, " cleared count = " + cnt);
+			}
+		};
+
+		runOnDatabaseThread(work);
+	}
+	
+	public static void updateChangesToDatabase(
+			Context context, 
+			final Uri uri, 
+			final BaseInfo prevItemInfo,
+			final BaseInfo newItemInfo) {
+        final ContentResolver cr = context.getContentResolver();
+
+        final ContentValues updateValues = prevItemInfo.onUpdateToDatabase(newItemInfo);
+        
+        final String uriStr = uri.toString() + "/" + prevItemInfo.id;
+        
+        if(Build.VERSION.SDK_INT >= 11) {
+        	if(updateValues.keySet().size() == 0) {
+        		return;
+        	}
+        }
+        
+        Runnable work = new Runnable() {
+			@SuppressWarnings("unused")
+            @Override
+			public void run() {
+				final int updatedCnt = cr.update(Uri.parse(uriStr), updateValues, null, null);
+				if(Debug.DEBUG && updatedCnt == 0)
+					android.util.Log.e(TAG, "update error, normally there is changes to update!");
+			}
+		};
+        
+		runOnDatabaseThread(work);
+	}
+	
+	public static void updateToDatabase(
+			Context context, 
+			final Uri uri, 
+			final long id,
+			final ContentValues newValues) {
+        final ContentResolver cr = context.getContentResolver();
+        newValues.remove(BaseEbookColumns.ID);
+
+        Runnable work = new Runnable() {
+			@SuppressWarnings("unused")
+            @Override
+			public void run() {
+		        final String uriStr = Uri.withAppendedPath(uri, id); ///uri.toString() + "/" + id;
+				final int updatedCnt = cr.update(Uri.parse(uriStr), newValues, null, null);
+				if(Debug.DEBUG && updatedCnt == 0)
+					android.util.Log.e(TAG, "update error, normally there is changes to update!");
+			}
+		};
+
+		runOnDatabaseThread(work);
+	}
+	
+	public void setAllTitlesList(List<TitleInfo> list) {
+		synchronized(mTitleListLock) {
+			mAllTitleList = list;
+		}
+		initSubTitlesList();
+	}
+	
+	public void initSubTitlesList() {
+		mDownloadTitleList = null;
+		mDeleteList = null;
+	}
+	
+	public void addToNotPurchasedInfo(TitleInfo titleInfo) {
+		if(mNotPurchasedInfoList == null)
+			mNotPurchasedInfoList = new ArrayList<TitleInfo>();
+		
+		if(!mNotPurchasedInfoList.contains(titleInfo))
+			mNotPurchasedInfoList.add(titleInfo);
+	}
+	
+	public List<TitleInfo> getAllTitlesList() {
+		return mAllTitleList;
+	}
+	
+	public List<TitleInfo> getTitlesList() {
+		ArrayList<TitleInfo> titleList = new ArrayList<TitleInfo>();
+		synchronized(mTitleListLock) {
+			if(mAllTitleList == null)
+				return titleList;
+
+			for(TitleInfo list : mAllTitleList) {
+				if(list.getPurchasedContents().size() > 0) 
+					titleList.add(list);
+			}
+		}
+		return titleList;
+	}
+
+	public List<TitleInfo> getDownloadTitlesList() {
+		if(mDownloadTitleList == null) {
+			mDownloadTitleList = new ArrayList<TitleInfo>();
+			synchronized(mTitleListLock) {
+				for(TitleInfo list : mAllTitleList) {
+					if(list.getDownloadContents().size() > 0) 
+						mDownloadTitleList.add(list);
+				}
+			}
+		}
+		return mDownloadTitleList;
+	}
+
+	public List<TitleInfo> getDeleteTitlesList() {
+		if(mDeleteList == null) {
+			mDeleteList = new ArrayList<TitleInfo>();
+			synchronized(mTitleListLock) {
+				for(TitleInfo list : mAllTitleList) {
+					if(list.getDeleteCandidateContents().size() > 0) 
+						mDeleteList.add(list);
+				}
+			}
+		}
+		return mDeleteList;
+	}
+
+	public void removeTitles(TitleInfo title) {
+		synchronized(mTitleListLock) {
+			if(mAllTitleList != null) 
+				mAllTitleList.remove(title);
+		}
+		
+		if(mDownloadTitleList != null) 
+			mDownloadTitleList.remove(title);
+		
+		if(mDeleteList != null) 
+			mDeleteList.remove(title);
+		
+		notifyDatasetChange();
+	}
+
+	public TitleInfo findTitleInfoById(long titleId) {
+		synchronized(mTitleListLock) {
+			if(mAllTitleList == null) 
+				return null;
+		
+			for(TitleInfo titleInfo : mAllTitleList) {
+				if(titleInfo.titleId == titleId) {
+					return titleInfo;
+				}
+			}
+		}
+		return null;
+	}
+	
+	public ContentInfo findContentInfoById(long titleId, String contentId) {
+		synchronized(mTitleListLock) {
+			if(mAllTitleList == null || titleId == 0 || contentId == null) {
+				android.util.Log.d(TAG, "[DEBUG] findContentInfoById(" + (mAllTitleList == null ? "null" : mAllTitleList.toString())
+						+ ", " + titleId + ", " + contentId + ")");
+				return null;
+			}
+		
+			for(TitleInfo titleInfo : mAllTitleList) {
+				if(titleInfo.titleId == titleId) {
+					if(titleInfo.getAllContents() != null) {
+						for(ContentInfo contentInfo : titleInfo.getAllContents()) {
+							if(contentId.equals(contentInfo.contentId))
+								return contentInfo;
+						}
+					} else {
+						android.util.Log.d(TAG, "[DEBUG] findContentInfoById() getAllContents() is NULL");
+						return null;
+					}
+				}
+			}
+		}
+		return null;
+	}
+	
+	public void initAllSamples() {
+		mSamples = null;
+	}
+	
+	public SampleInfo findSampleInfo(long titleId, String contentId) {
+		if(mSamples == null || titleId == 0) 
+			return null;
+
+		for(SampleInfo sampleInfo : mSamples) {
+			if(titleId == sampleInfo.titleId && contentId.equals(sampleInfo.contentId))
+				return sampleInfo;
+		}
+		return null;
+	}
+	
+	public void addSampleInfo(Context context, SampleInfo sampleInfo) {
+		if(mSamples == null)
+			mSamples = new ArrayList<SampleInfo>();
+
+		mSamples.add(sampleInfo);
+		Collections.sort(mSamples, mSampleComparator);
+	}
+
+	public void updateSampleInfo() {
+		if(mSamples != null) {
+			Collections.sort(mSamples, mSampleComparator);
+		}
+	}
+
+	public void setTemporarySampleInfoForDownloads(SampleInfo sampleInfo) {
+		if(sampleInfo == null) {
+			mTempSampleInfo = null;
+			return;
+		}
+		mTempSampleInfo = ContentInfo.createDummyInfo(
+				sampleInfo.titleId, sampleInfo.contentId, null, 0, true);
+	}
+	
+	public ContentInfo getTemporarySamplInfoForDownloads() {
+		return mTempSampleInfo;
+	}
+	
+	public void setTemporaryBackgroundDownloadContentInfo(ContentInfo contentInfo) {
+		mTempBGDownloadContentInfo = contentInfo;
+	}
+	
+	public ContentInfo getTemporaryBackgroundDownloadContentInfo() {
+		return mTempBGDownloadContentInfo;
+	}
+    
+    /**
+     * Runs the specified runnable immediately if called from the worker thread, otherwise it is
+     * posted on the worker thread handler.
+     * 
+     * @param r Runnable to run on worker thread
+     */
+    public static void runOnBackgroundThread(Runnable r) {
+        runOnBackgroundThread(r, false);
+    }
+
+    public static void runOnBackgroundThread(Runnable r, boolean isLowPriority) {
+        int apiId = 0;
+        if(r instanceof ServerTask<?>) {
+            apiId = ((ServerTask<?>)r).getApiId();
+        }
+    	sBackgroundWorker.post(r, apiId, isLowPriority);
+    }
+
+	/**
+     * Runs the content decode runnable immediately if called from the worker thread,
+     * otherwise it is posted on the worker thread handler.
+     * 
+     * @param r Runnable to run on decoder thread
+     */
+    public static void runOnForegroundThread(Runnable r) {
+        int apiId = 0;
+        if(r instanceof ServerTask<?>) {
+            apiId = ((ServerTask<?>)r).getApiId();
+        }
+        sForegroundWorker.post(r, apiId);
+    }
+
+	/**
+     * Runs the specified runnable immediately if called from the database thread, otherwise it is
+     * posted on the database thread handler.
+     * 
+     * @param r Runnable to run on database thread
+     */
+    public static void runOnDatabaseThread(Runnable r) {
+        sDatabaseWorker.post(r);
+    }
+
+	public static void stopBackgroundThreads() {
+		sBackgroundWorker.cancel();
+	}
+
+    public static void stopImeiBackgroundThreads() {
+        sForegroundWorker.cancelAllRunnablesOfType(ServerInterface.API_IMEI_REGISTER);
+        sForegroundWorker.cancelAllRunnablesOfType(ServerInterface.API_IMEI_VERIFY);
+    }
+
+    public void procImeiVerification(int requestPosition) {
+        procImeiVerification(requestPosition, false);
+    }
+
+	public void procImeiVerification(int requestPosition, boolean ignoreError) {
+	    android.util.Log.e("DEBUG", "procImeiVerification from : " + requestPosition);
+        mLastImeiProcessed++;
+		final Map<String, String> request = new HashMap<String, String>();
+		request.put(ImeiVerify.INITIATE_FROM, String.valueOf(requestPosition));
+        request.put(ImeiVerify.INITIATE_NUMBER, String.valueOf(mLastImeiProcessed));
+		
+		final ImeiVerify imeiVerify = new ImeiVerify(mContext);
+		imeiVerify.setCallback(this);
+		imeiVerify.setRequest(request);
+		if(ignoreError)
+		    imeiVerify.ignoreError();
+		EbookModel.runOnForegroundThread(imeiVerify);
+    }
+
+    public void cancelImeiVerification() {
+        mLastImeiProcessed++;
+        stopImeiBackgroundThreads();
+    }
+
+	public static void stopDatabaseThreads() {
+		sDatabaseWorker.removeCallbacksAndMessages(null);
+	}
+
+	public void cancelImeiRegister(int from) {
+		if(mViewerServerTaskCallback != null)
+			mViewerServerTaskCallback.onImeiRegisterCancel(from);
+		else
+			mServerCallback.onImeiRegisterCancel(from);
+	}
+
+	@Override
+	public void onRequestFailed(final ServerTask<?> parser, ServerResult<?> result) {
+		android.util.Log.e("DEBUG", "onRequestFailed : " + parser+",result:"+result);
+		int errorCode = result.getResourceId();
+		final int apiId = parser.getApiId();
+		
+		if(errorCode != 100) {
+			switch(apiId) {
+				case ServerInterface.API_RECOMMEND_COVERFLOW:
+					updateCoverFlowImages(((CoverflowSync)parser).getDownloadTitleIdList());
+//					if(EbookPreferences.getBoolean(EbookPreferences.STARTING_KEY, false)) {
+//						if(mServerCallback != null) {
+//							((EbookLauncher)mServerCallback).clearFirstLaunch();
+//						}
+//					}
+					return;
+
+				case ServerInterface.API_ADVERT_DISPADVERT:
+					// We do nothing
+					return;
+			}
+		}
+		
+		final ActionState stateToCheck;
+		if(mViewerServerTaskCallback != null) {
+			stateToCheck = mViewerActionState;
+		} else {
+			stateToCheck = mActionState;
+		}
+		switch (stateToCheck) {
+			case DROP:
+				return;
+			case PENDING:
+				if(!isBackGroundTask(parser.getApiId()))
+					mPendingServerTask = parser;
+				return;
+			case NORMAL:
+			default:
+				break;
+		}
+
+		//cancel all background task, setting next task to this
+		if(errorCode == 100) {//RESPONSE_CODE_COOKIE_EXPIRED
+			stopBackgroundThreads();
+		}
+		if(!isBackGroundTask(parser.getApiId())) {
+			mNextTask = parser;
+		}
+
+		Object content = result.getContent();
+		if(errorCode != 100) {
+			switch(apiId) {
+				case ServerInterface.API_BOOKSHELF_SYNC:
+					if(mServerCallback != null) {
+					    final boolean updateCancel = ((EbookLauncher)mServerCallback).isUpdateCanceled();
+	                    if(!updateCancel) {
+	                        mServerCallback.onSyncAllBooksFinished(parser.isIgnoreError(), errorCode);
+	                    }
+
+//						if(EbookPreferences.getBoolean(EbookPreferences.STARTING_KEY, false)) {
+//							if(((EbookLauncher)mServerCallback).isFirstLaunch()) {
+//								((EbookLauncher)mServerCallback).clearFirstLaunch();
+//								return;
+//							}
+//						}
+					}
+					break;
+
+				case ServerInterface.API_CONTENTS_DOWNLOAD:
+				case ServerInterface.API_CONTENTS_DOWNLOAD2:
+				case ServerInterface.API_CONTENTS_DOWNLOAD_RESUME:
+				case ServerInterface.API_CONTENTS_DOWNLOAD_RESUME2:
+				case ServerInterface.API_CONTENTS_DOWNLOAD_COMPLETE:
+					if(parser instanceof DownloadTask) {
+						DownloadTask task = (DownloadTask)parser;
+						ContentInfo currentDownloadItem = task.getContentInfo();
+						if(errorCode == Integer.parseInt(ServerTask.RESPONSE_CODE_IMEI_ERROR)) {
+							StringBuilder sb = new StringBuilder();
+							if(currentDownloadItem != null)
+								sb.append(currentDownloadItem.titleId + ":" + currentDownloadItem.contentId);
+
+							if(content instanceof Map) {
+								@SuppressWarnings("unchecked")
+                                HashMap<String, String> imeiFailResult = (HashMap<String, String>)content;
+								final String dlList = imeiFailResult.get(DownloadTask.RESULT_KEY_BG_DL_LIST);
+								if(dlList != null && dlList.length() > 0)
+									sb.append("," + dlList);
+							}
+
+							mWaitingDownloadItems = sb.toString();
+							task.cancelWaitingBackgroundDownload();
+						} else {
+//							if(task.isBackgroundDownload()) {
+//								if(errorCode == HttpCommunicationService.RESPONSE_NOT_SPACE)
+//									errorCode = HttpCommunicationService.RESPONSE_FAILED;
+//							}
+						}
+
+						if(task.isBackgroundDownload()) {
+							Intent downloadIntent = new Intent(Constants.ACTION_UPDATE_DOWNLOAD_CANCELED); 
+							downloadIntent.putExtra(TitleInfo.TITLE_ID, currentDownloadItem.titleId);
+							downloadIntent.putExtra(ContentInfo.CONTENTS_ID, currentDownloadItem.contentId);
+							final LocalBroadcastManager localBroadcastManager = LocalBroadcastManager.getInstance(mContext);
+							localBroadcastManager.sendBroadcast(downloadIntent);
+							return; // ignore error popup if is background download
+						}
+					}
+					
+					// This error catching is only for Foreground downloads
+					if(errorCode == HttpCommunicationService.RESPONSE_ERROR_RETRY) {
+						//Retry foreground download with range download
+						//TODO Download retry
+					}
+					break;
+
+				case ServerInterface.API_IMEI_VERIFY:
+					if(content instanceof Map) {
+						@SuppressWarnings("unchecked")
+						HashMap<String, String> imeiVerifyResult = (HashMap<String, String>)content;
+				        final int from = Integer.parseInt(imeiVerifyResult.get(ImeiVerify.INITIATE_FROM));
+                        final int number = Integer.parseInt(imeiVerifyResult.get(ImeiVerify.INITIATE_NUMBER));
+		                if(number != mLastImeiProcessed) return;
+
+		                switch(from) {
+			                case ImeiVerify.IMEI_REGISTER_FROM_CONTENT_DETAIL:
+			                	if(errorCode == HttpCommunicationService.RESPONSE_TIMEOUT
+			                		|| errorCode == HttpCommunicationService.RESPONSE_CONNECTION) {
+				                	processImeiResult(imeiVerifyResult, errorCode, parser.isIgnoreError());
+				                	break;
+			                	}
+
+		                	default:
+								ImeiRegister imeiRegister = new ImeiRegister(mContext);
+								imeiRegister.setCallback(this);
+								imeiRegister.setRequest(imeiVerifyResult);
+                                if(parser.isIgnoreError())
+                                    imeiRegister.ignoreError();
+								EbookModel.runOnForegroundThread(imeiRegister);
+		                		break;
+		                }
+						return;
+					}
+					break;
+
+				case ServerInterface.API_IMEI_REGISTER:
+					if(content instanceof Map) {
+						@SuppressWarnings("unchecked")
+						HashMap<String, String> imeiResult = (HashMap<String, String>)content;
+						processImeiResult(imeiResult, errorCode, parser.isIgnoreError());
+						return;
+					}
+					break;
+					
+				case ServerInterface.API_BOOKSHELF_FIRSTITEM:
+					break;
+
+				case ServerInterface.API_BOOKSHELF_COVERIMAGE:
+				case ServerInterface.API_GET_NOT_PURCHASED:
+                case ServerInterface.API_ITEM_NAME:
+					// ignore cover image communication fail
+					return;
+			}
+		}
+
+		if(parser.isIgnoreError()) {
+			android.util.Log.e(TAG, "Ignore error(" + errorCode + ") of 0x" + Integer.toHexString(apiId) + ". Ignore flag set.");
+		}
+
+        if(apiId != ServerInterface.API_APP_VERSION
+        		&& apiId != ServerInterface.API_IMEI_REPLACE
+        		&& ((EbookLauncher)mServerCallback).isFirstLaunch()) {
+        	android.util.Log.e(TAG, "Ignore error(" + errorCode + ") of 0x" + Integer.toHexString(apiId) + ". we are not started yet.");
+        	return;
+        }
+
+		if(errorCode > 0) {
+			if(mViewerServerTaskCallback != null) {
+				mViewerServerTaskCallback.onServerTaskFailed(errorCode, apiId, result.getContent());
+			} else if(mServerCallback != null) {
+				mServerCallback.onServerTaskFailed(errorCode, apiId, result.getContent(), parser.isIgnoreError());
+			}
+		}
+	}
+
+	private void processImeiResult(Map<String, String> imeiResult) {
+		processImeiResult(imeiResult, 0, false);
+	}
+
+	private void processImeiResult(Map<String, String> imeiResult, int errorCode, boolean ignoreError) {
+		final int from = Integer.parseInt(imeiResult.get(ImeiVerify.INITIATE_FROM));
+        final int number = Integer.parseInt(imeiResult.get(ImeiVerify.INITIATE_NUMBER));
+		if(number != mLastImeiProcessed) return;
+		final String registerResult = imeiResult.get(HttpCommunicationService.RESULT);
+		if(registerResult != null && registerResult.equals("OK")) {
+			if(mViewerServerTaskCallback != null) 
+				mViewerServerTaskCallback.onImeiRegisterSuccess(from);
+			else 
+				mServerCallback.onImeiRegisterSuccess(from);
+		} else {
+			String imeiList = imeiResult.get(ImeiRegister.PARAM_IMEI_DATA);
+			if(imeiList == null || imeiList.equals("")) {
+				if(mViewerServerTaskCallback != null)
+					mViewerServerTaskCallback.onImeiRegisterFail(errorCode, from);
+				else
+					mServerCallback.onImeiRegisterFail(errorCode, from, ignoreError);
+				return;
+			}
+			Bundle bundle = new Bundle();
+			bundle.putString(ExtraKeys.IMEI_LIST, imeiList);
+			bundle.putInt(ImeiVerify.INITIATE_FROM, from);
+			final String isLimit = imeiResult.get(ImeiRegister.PARAM_LIMIT);
+			if(isLimit != null && isLimit.equals("LM"))
+				bundle.putBoolean(ExtraKeys.VISIBLE_FLG, false);
+			else
+				bundle.putBoolean(ExtraKeys.VISIBLE_FLG, true);
+			bundle.putString(ImeiRegister.PARAM_IMEI, imeiResult.get(ImeiRegister.PARAM_IMEI));
+
+			FragmentActivity activity = null;
+			if(mViewerServerTaskCallback != null) {
+				activity = (FragmentActivity) mViewerServerTaskCallback;
+				if(activity instanceof MenuCallback) {
+					((MenuCallback)activity).changeViewerState("VIEWER_IMEI_REGIST", bundle);
+				}
+			} else {
+				activity = (EbookLauncher)mServerCallback;
+				((EbookLauncher)activity).startImeiReplace(bundle);
+			}
+		}
+	}
+	
+	public void setNeedNewItemBlink(boolean needNewItemBlink) {
+		mNeedNewItemBlink = needNewItemBlink;
+	}
+	
+	public boolean isNeedNewItemBlink() {
+		return mNeedNewItemBlink;
+	}
+	
+	public boolean checkNewItemInfoExist(TitleInfo titleInfo) {
+		// Find new items for titles
+        boolean needUpdateMain = false;
+		if(getAllTitlesList() != null) {
+			final Calendar calendar = Calendar.getInstance();
+			final Date currentDate = calendar.getTime();
+			calendar.setTimeInMillis(titleInfo.releaseDate.getTime());
+			calendar.add(Calendar.MONTH, 1);
+			final Date oneMonthNextFromReleaseDate = calendar.getTime();
+			final boolean isNotOver30Days = (oneMonthNextFromReleaseDate.getTime() - currentDate.getTime()) > 0;
+			
+			ContentInfo newItemIdInfo = findContentInfoById(titleInfo.titleId, titleInfo.newItemId);
+			if(isNotOver30Days) {
+				if(newItemIdInfo == null) {
+					newItemIdInfo = 
+							ContentInfo.createDummyInfo(titleInfo.titleId, titleInfo.newItemId, null, Contents.TYPE_CONTENTS_NEW_ITEM, false);
+
+					titleInfo.addContents(newItemIdInfo);
+					EbookModel.addToDatabase(mContext, Contents.CONTENT_URI, newItemIdInfo);
+					titleInfo.setNextOrNewContentInfo(newItemIdInfo);
+					if(titleInfo.getPurchasedContents().size() > 0)
+					    setNeedNewItemBlink(true);
+
+                    Map<String, String> request = new HashMap<String, String>();
+                    request.put(TitleInfo.TITLE_ID, Util.getTitleId(titleInfo.titleId));
+                    request.put(ContentInfo.CONTENTS_ID, titleInfo.newItemId);
+                    request.put(ContentInfo.CONTENTS_TYPE, String.valueOf(Contents.TYPE_CONTENTS_NEW_ITEM));
+                    
+                    GetItemName getNameTask = new GetItemName(mContext);
+                    getNameTask.setRequest(request);
+                    getNameTask.setCallback(this);
+                    EbookModel.runOnBackgroundThread(getNameTask);
+                    needUpdateMain = true;
+				} else if(newItemIdInfo != null && (newItemIdInfo.contentName == null || "".equals(newItemIdInfo.contentName))) {
+					Map<String, String> request = new HashMap<String, String>();
+					request.put(TitleInfo.TITLE_ID, Util.getTitleId(titleInfo.titleId));
+					request.put(ContentInfo.CONTENTS_ID, titleInfo.newItemId);
+					request.put(ContentInfo.CONTENTS_TYPE, String.valueOf(Contents.TYPE_CONTENTS_NEW_ITEM));
+
+					GetItemName getNameTask = new GetItemName(mContext);
+					getNameTask.setRequest(request);
+					getNameTask.setCallback(this);
+					EbookModel.runOnBackgroundThread(getNameTask);
+					
+				} else if(newItemIdInfo.contentsType == Contents.TYPE_CONTENTS_NEW_ITEM) {
+					titleInfo.setNextOrNewContentInfo(newItemIdInfo);
+					needUpdateMain = true;
+				} else if(newItemIdInfo.contentsType == Contents.TYPE_CONTENTS_NORMAL
+				        && newItemIdInfo.deletedFlag && titleInfo.newItemId.equals(newItemIdInfo.contentId)) {
+					//Deleted to NewItem
+					newItemIdInfo.contentsType = Contents.TYPE_CONTENTS_NEW_ITEM;
+					titleInfo.setNextOrNewContentInfo(newItemIdInfo);
+					needUpdateMain = true;
+					ContentValues updatedValues = new ContentValues();
+					updatedValues.put(Contents.CONTENTS_TYPE, newItemIdInfo.contentsType);
+					EbookModel.updateToDatabase(mContext, Contents.CONTENT_URI, newItemIdInfo.id, updatedValues);
+//					setNeedNewItemBlink(true);
+				}
+			} else {
+				if(newItemIdInfo != null && newItemIdInfo.contentsType == Contents.TYPE_CONTENTS_NEW_ITEM) {
+					titleInfo.setNextOrNewContentInfo(null);
+					needUpdateMain = true;
+				}
+			}
+
+			if(mNotPurchasedInfoList != null) {
+				final ContentInfo newInfo = titleInfo.getNextOrNewContent();
+				if(newInfo != null && newInfo.contentsType == Contents.TYPE_CONTENTS_NEW_ITEM)
+					mNotPurchasedInfoList.remove(titleInfo); // Use to make less packet
+			}
+		}
+		
+		return needUpdateMain;
+	}
+	
+//	public void notifyNewOrNext() {
+//        if(mServerCallback != null)
+//            mServerCallback.onUpdatedNewOrNextItems(true, -1);
+//	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void onRequestSucceed(final ServerTask<?> parser, ServerResult<?> result) {
+		final Object content = result.getContent();
+		JSONArray jsroot;
+
+		final int apiId = parser.getApiId();
+		switch(apiId) {
+			case ServerInterface.API_RECOMMEND_COVERFLOW:
+				updateCoverFlowImages(((CoverflowSync)parser).getDownloadTitleIdList());
+//				if(EbookPreferences.getBoolean(EbookPreferences.STARTING_KEY, false)) {
+//					if(mServerCallback != null) {
+//						((EbookLauncher)mServerCallback).clearFirstLaunch();
+//					}
+//				}
+				break;
+
+			case ServerInterface.API_GET_NOT_PURCHASED:
+				if(content instanceof Map) {
+					final Map<String, String> purchaseResultMap = (Map<String, String>)content;
+					final long titleId = Long.valueOf(purchaseResultMap.get(TitleInfo.TITLE_ID));
+					final String latestItemId = purchaseResultMap.get("latest_item_id");
+					final String firstItemId = purchaseResultMap.get("first_item_id");
+                    final TitleInfo titleInfo = findTitleInfoById(titleId);
+					//TODO
+					String contentId = null;
+					String itemName = null;
+					int contentType = -1;
+					if(latestItemId != null) {
+						contentId = latestItemId;
+						itemName = purchaseResultMap.get("latest_item_nm");
+						contentType = Contents.TYPE_CONTENTS_NEW_ITEM;
+					} else if(firstItemId != null) {
+						contentId = firstItemId;
+						itemName = purchaseResultMap.get("first_item_nm");
+						contentType = Contents.TYPE_CONTENTS_NEXT_ITEM;
+					} else {
+					    if(titleInfo != null) {
+					        ContentInfo newOrNext = titleInfo.getNextOrNewContent();
+					        if(newOrNext != null) {
+                                titleInfo.removeContents(newOrNext);
+					            titleInfo.setNextOrNewContentInfo(null);
+					            EbookModel.deleteFromDatabase(mContext, Contents.CONTENT_URI, newOrNext.id);
+					        }
+					    }
+						break;
+					}
+
+					ContentInfo newOrNextInfo = findContentInfoById(titleId, contentId);
+					if(titleInfo != null) {
+						if(newOrNextInfo == null) {
+							newOrNextInfo = ContentInfo.createDummyInfo(
+									titleInfo.titleId, 
+									contentId, 
+									itemName, 
+									contentType, 
+									false /* Not sample */);
+	
+							EbookModel.addToDatabase(mContext, Contents.CONTENT_URI, newOrNextInfo);
+						} else {
+							newOrNextInfo.contentsType = contentType;
+                            newOrNextInfo.contentName = itemName;
+							ContentValues updatedValues = new ContentValues();
+							updatedValues.put(Contents.CONTENTS_TYPE, contentType);
+                            updatedValues.put(Contents.CONTENTS_NAME, itemName);
+							EbookModel.updateToDatabase(mContext, Contents.CONTENT_URI, newOrNextInfo.id, updatedValues);
+						}
+	
+						titleInfo.addContents(newOrNextInfo);
+						titleInfo.setNextOrNewContentInfo(newOrNextInfo);
+						
+						if (!Util.isExistsTitleImage(mContext, titleInfo.titleId, contentId)) {
+							jsroot = new JSONArray();
+							JSONObject jsobj = new JSONObject();
+							try {
+								jsobj.put(TitleInfo.TITLE_ID, Util.getTitleId(titleInfo.titleId));
+								jsobj.put(ContentInfo.CONTENTS_ID, contentId);
+							} catch (JSONException e) {
+								e.printStackTrace();
+							}
+							jsroot.put(jsobj);
+	
+							Map<String, String> request = new HashMap<String, String>();
+							request.put(ThumbnailDownload.BOOK_THUMBNAIL_DOWNLOADER_DATA, jsroot.toString());
+	
+							ThumbnailDownload thumbnailDownload = new ThumbnailDownload(mContext);
+							thumbnailDownload.setRequest(request);
+							thumbnailDownload.setRequestType(ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_NEXT_ITEM_COVER);
+							thumbnailDownload.setCallback(EbookModel.this);
+							EbookModel.runOnBackgroundThread(thumbnailDownload);
+						}
+					}
+				}
+				break;
+
+            case ServerInterface.API_ITEM_NAME:
+                if(content instanceof Map) {
+                    final Map<String, String> nameResult = (Map<String, String>)content;
+                    
+                    final int contentType = Integer.valueOf(nameResult.get(ContentInfo.CONTENTS_TYPE));
+                    
+                    switch(contentType) {
+                    case Contents.TYPE_CONTENTS_NEW_ITEM:
+                        
+                        final long titleId = Long.valueOf(nameResult.get(TitleInfo.TITLE_ID));
+                        final String contentId = nameResult.get(ContentInfo.CONTENTS_ID);
+                        final String retrievedContentName = nameResult.get(ContentInfo.ITEM_NAME);
+
+                        final ContentInfo contentInfo = findContentInfoById(titleId, contentId);
+                        contentInfo.contentName = retrievedContentName;
+                        ContentValues updatedValues = new ContentValues();
+                        updatedValues.put(Contents.CONTENTS_NAME, retrievedContentName);
+
+                        EbookModel.updateToDatabase(mContext, Contents.CONTENT_URI, contentInfo.id, updatedValues);
+                        
+                        break;
+                    }
+                }
+                break;
+		}
+		
+		final ActionState stateToCheck;
+		if(mViewerServerTaskCallback != null) {
+			stateToCheck = mViewerActionState;
+		} else {
+			stateToCheck = mActionState;
+		}
+		switch (stateToCheck) {
+			case DROP:
+				return;
+			case PENDING:
+				if(!isBackGroundTask(parser.getApiId()))
+					mPendingServerTask = parser;
+				return;
+			case NORMAL:
+			default:
+				break;
+		}
+
+		switch(apiId) {
+			case ServerInterface.API_BOOKSHELF_SYNC:
+				if(mServerCallback != null) {
+					final boolean updateCancel = ((EbookLauncher)mServerCallback).isUpdateCanceled();
+					if(!updateCancel) {
+						mServerCallback.onSyncAllBooksFinished(parser.isIgnoreError(), result.getResourceId());
+					}
+
+//					if(EbookPreferences.getBoolean(EbookPreferences.STARTING_KEY, false)) {
+//						((EbookLauncher)mServerCallback).clearFirstLaunch();
+//					}
+				}
+				break;
+
+			case ServerInterface.API_BOOKSHELF_ONESYNC:
+				final Map<String, String> resultMap = (Map<String, String>)content;
+				if(resultMap != null) {
+					final String titleIdInStr = resultMap.get(TitleInfo.TITLE_ID);
+					final String contentId = resultMap.get(ContentInfo.CONTENTS_ID);
+					final String moveToState = resultMap.get(SyncOneBook.EXTRA_MOVE_TO_STATE);
+					ContentInfo contentInfo = null;
+					if(titleIdInStr != null && contentId != null) {// && MoveToState.TO_DETAIL.name().equals(moveToState)) {
+						contentInfo = findContentInfoById(Long.valueOf(titleIdInStr), contentId);
+					}
+
+					boolean moveToNext = false;
+					if(mServerCallback != null && !MoveToState.NONE.name().equals(moveToState)) 
+						moveToNext = true;
+					mServerCallback.onSyncOneBookFinished(contentInfo, ((SyncOneBook)parser).isMultiDownload(), moveToNext);
+
+					if(Boolean.parseBoolean(resultMap.get(SyncOneBook.SYNC_COVERFLOW)))
+						runCoverFlowSync();
+				}
+				break;
+
+			case ServerInterface.API_BOOKSHELF_COVERIMAGE:
+				break;
+
+			case ServerInterface.API_CONTENTS_DOWNLOAD:
+				break;
+
+			case ServerInterface.API_ADVERT_DISPADVERT:
+				mBanner = (String)content;
+				break;
+
+			case ServerInterface.API_APP_VERSION:
+				final Map<String, String> versionResultMap = (Map<String, String>)content;
+				if(mServerCallback != null) 
+					mServerCallback.onGetVersionSuccess(versionResultMap);
+				break;
+
+			case ServerInterface.API_GET_NOT_PURCHASED:
+				if(mServerCallback != null) {
+				    if(content instanceof Map) {
+	                    final Map<String, String> purchaseResultMap = (Map<String, String>)content;
+	                    final long titleId = Long.valueOf(purchaseResultMap.get(TitleInfo.TITLE_ID));
+	                    mServerCallback.onTitleContentUpdated(titleId);
+				    }
+				}
+				break;
+
+			case ServerInterface.API_IMEI_VERIFY:
+				if(content instanceof Map) {
+					HashMap<String, String> imeiResult = (HashMap<String, String>)content;
+					final int from = Integer.parseInt(imeiResult.get(ImeiVerify.INITIATE_FROM));
+			        final int number = Integer.parseInt(imeiResult.get(ImeiVerify.INITIATE_NUMBER));
+					if(number != mLastImeiProcessed) return;
+					if(mViewerServerTaskCallback != null) {
+						mViewerServerTaskCallback.onImeiRegisterSuccess(from);
+					} else if(mServerCallback != null) {
+						mServerCallback.onImeiRegisterSuccess(from);
+					}
+				}
+				break;
+
+			case ServerInterface.API_IMEI_REGISTER:
+				if(content instanceof Map) {
+					HashMap<String, String> imeiResult = (HashMap<String, String>)content;
+					processImeiResult(imeiResult);
+				}
+				break;
+
+			case ServerInterface.API_IMEI_REPLACE:
+				final int from = (Integer)content;
+				if(mViewerServerTaskCallback != null) 
+					mViewerServerTaskCallback.onSuccessImeiReplace(from);
+				else if(mServerCallback != null)
+					mServerCallback.onSuccessImeiReplace(from);
+				break;
+
+			case ServerInterface.API_BOOKSHELF_DELETEITEM:
+				if(mServerCallback != null) {
+					mServerCallback.onBookShelfDelete();
+				}
+				break;
+			case ServerInterface.API_BOOKSHELF_FIRSTITEM:
+				if(content instanceof Map) {
+					HashMap<String, String> firstIdResult = (HashMap<String, String>)content;
+					final String firstId = firstIdResult.get(ContentInfo.CONTENTS_ID);
+					if(mViewerServerTaskCallback != null) {
+						mViewerServerTaskCallback.onSuccessGetFirstItemId(firstId);
+					}
+				}
+
+			default:
+				break;
+		}
+	}
+
+	@Override
+	public void onCoverflowReady() {
+		mCoverFlowReady = true;
+		if(mPendingUpdateCoverFlow) {
+			mPendingUpdateCoverFlow = false;
+			setImageToCoverflow();
+		}
+	}
+	
+	public CoverflowMode getCoverflowMode() {
+		return mCoverflowMode;
+	}
+	
+	public void setCoverflowMode(CoverflowMode mode) {
+		mCoverflowMode = mode;
+		if(mCoverFlowReady)
+			setImageToCoverflow();
+		else
+			mPendingUpdateCoverFlow = true;
+	}
+
+	private void setImageToCoverflow() {
+		List<CoverFlowImageData> coverflowList = null;
+		if(mCoverflowMode == CoverflowMode.RECOMMENDS) {
+			coverflowList = mRecommendations;
+		} else {
+			final List<TitleInfo> titles = getTitlesList();
+			if(titles != null && titles.size() > 0) {
+				coverflowList = new ArrayList<CoverFlowImageData>();
+				for(TitleInfo title : titles) {
+					coverflowList.add(new CoverFlowImageData(title.titleId, false));					
+				}
+			}
+		}
+
+		int count = (mCoverflowMode == CoverflowMode.RECOMMENDS) ?
+				Math.min(CoverflowManager.COVERFLOW_ITEM_MAX, coverflowList.size()) : coverflowList.size();
+		if(count > 0) {
+			((EbookLauncher)mServerCallback).changeCoverFlowEmptyState(false);
+			CoverflowManager.getInstance(mContext).clearItemInfo();
+
+			for(int i = 0 ; i < count ; i++) {
+				final CoverFlowImageData image = coverflowList.get(i);
+				final long titleId = image.titleId;
+				final boolean isSample = image.isSample;
+				final int textResourceId;
+				if(mCoverflowMode == CoverflowMode.RECOMMENDS) {
+					if(EbookApplication.isScreenLarge()) {
+						if(isSample)
+							textResourceId = R.drawable.text_free_bg_tab;
+						else
+							textResourceId = R.drawable.text_recommendation_bg_tab;
+					} else {
+						if(isSample)
+							textResourceId = R.drawable.text_free_bg_sp;
+						else
+							textResourceId = R.drawable.text_recommendation_bg_sp;
+					}
+				} else {
+					textResourceId = 0; 
+				}
+
+				CoverflowManager.getInstance(mContext).updateItemInfo(
+						i, titleId, "", isSample, textResourceId);
+			}
+		} else {
+			CoverflowManager.getInstance(mContext).requestHideCoverflow();
+			((EbookLauncher)mServerCallback).changeCoverFlowEmptyState(true);
+		}
+	}
+
+	@Override
+	public void onRequestIndividualFinished(final ServerTask<?> parser, ServerResult<?> result) {
+		switch (mActionState) {
+			case DROP:
+			case PENDING: //In most cases, individual requests in 'paused state' does mean nothing
+				return;
+			case NORMAL:
+			default:
+		}
+		
+		Log.d("DW", "[EbookModel#onRequestIndividualFinished()]parser.getApiId()=" + parser.getApiId() + 
+				", reqType=" + ((ThumbnailDownload)parser).getRequestType());
+		switch (parser.getApiId()) {
+			case ServerInterface.API_BOOKSHELF_COVERIMAGE:
+				int reqType = ((ThumbnailDownload)parser).getRequestType();
+				if(mServerCallback != null && (reqType == ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_BOOK_COVER
+				            || reqType == ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_NEXT_ITEM_COVER)) {
+					mServerCallback.onIndividualCoverImageDownloadFinished();
+				}
+				if(mServerCallback != null && (reqType == ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_COVER_FLOW
+							|| reqType == ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_COVER_FLOW_SAMPLE)) {
+					final ServerResult<?> fResult = result;
+					ContentInfo contentInfo = (ContentInfo)(fResult.getContent());
+					if(contentInfo != null && mServerCallback != null) {
+						mServerCallback.onIndividualCoverflowImageDownloadFinished(contentInfo.titleId, contentInfo.contentId, contentInfo.isSample);
+					}
+				}
+				break;
+		}
+	}
+	
+	public void registTitleObserver(ModelDataObserver observer) {
+		if(observer == null) return;
+		synchronized(mObserver) {
+			if(!mObserver.contains(observer)) mObserver.add(observer);
+		}
+	}
+	
+	public void unregistTitleObserver(ModelDataObserver observer) {
+		if(observer == null) return;
+		synchronized(mObserver) {
+			if(mObserver.contains(observer)) mObserver.remove(observer);
+		}
+	}
+	
+	public void notifyDatasetChange() {
+		for(ModelDataObserver observer : mObserver) {
+			observer.onChanged();
+		}
+	}
+
+	public String getBannerContent() {
+		return mBanner;
+	}
+	
+	public void downloadStatusFinished(boolean ignoreError) {
+	    runCoverFlowSync(ignoreError);
+
+		if(mServerCallback != null)
+			mServerCallback.onSyncDownloadStatusFinished();	
+	}
+
+	public void setBSKomaNextContent(Intent data) {
+		mBSKomaNextContentInfo = data;
+	}
+
+	public Intent getBSKomaNextContent() {
+		if(mBSKomaNextContentInfo != null) {
+			Intent ret = mBSKomaNextContentInfo;
+			mBSKomaNextContentInfo = null;
+			return ret;
+		}
+		return null;
+	}
+	
+	public ServerTask<?> getNextTask() {
+		return mNextTask;
+	}
+	
+	public void clearNextTask() {
+		mNextTask = null;
+	}
+	
+	public void runNextTask() {
+		if(!isBackGroundTask(mNextTask.getApiId())) {
+			runOnForegroundThread(mNextTask);
+			mNextTask = null;
+		}
+	}
+	
+	public boolean isBackGroundTask(int apiId) {
+		if(apiId == ServerInterface.API_GET_NOT_PURCHASED
+				|| apiId == ServerInterface.API_RECOMMEND_COVERFLOW
+				|| apiId == ServerInterface.API_BOOKSHELF_COVERIMAGE
+				|| apiId == ServerInterface.API_BOOKSHELF_ONESYNC
+				|| apiId == ServerInterface.API_ADVERT_DISPADVERT
+				|| apiId == ServerInterface.API_ITEM_NAME)
+			return true;
+		return false;
+	}
+
+	public void updateCoverFlowItem(ArrayList<Long> list, boolean delete) {
+		if(list.size() == 0)
+			return;
+
+		int removed = 0;
+		if(mRecommendations != null) {
+			for(int i = mRecommendations.size() - 1 ; i >= 0 ; i--) {
+				CoverFlowImageData coverflow = mRecommendations.get(i);
+				for(int j = list.size() - 1 ; j >= 0 ; j--) {
+					long titleId = list.get(j);
+					if(titleId == coverflow.titleId) {
+						list.remove(j);
+						mRecommendations.remove(i);
+						removed++;
+						break;
+					}
+				}
+				if(list.size() == 0)
+					break;
+			}
+		}
+
+		if(removed > 0) {
+			if(delete) {
+				for(int i = 0 ; i < removed ; i++)
+					CoverflowManager.getInstance(mContext).removeItemInfo();
+			}
+			setImageToCoverflow();
+		}
+	}
+
+    public void runCoverFlowSync() {
+        runCoverFlowSync(false);
+    }
+
+	public void runCoverFlowSync(boolean ignoreError) {
+		CoverflowSync coverFlowSync = new CoverflowSync(mContext);
+		HashMap<String, String> map = new HashMap<String, String>();
+		coverFlowSync.setRequest(map);
+		coverFlowSync.setCallback(EbookModel.this);
+		if(ignoreError)
+		    coverFlowSync.ignoreError();
+		EbookModel.runOnBackgroundThread(coverFlowSync);
+	}
+	
+	public void onClickImeiOk() {
+		if(mViewerServerTaskCallback != null) {
+			mViewerServerTaskCallback.onClickImeiOk();
+		} else {
+			mServerCallback.onClickImeiOk();
+		}
+	}
+	
+	public void onClickImeiCancel() {
+		if(mViewerServerTaskCallback != null) {
+			mViewerServerTaskCallback.onClickImeiCancel();
+		} else {
+			mServerCallback.onClickImeiCancel();
+		}
+	}
+	
+	public void onClickImeiHelp() {
+		if(mViewerServerTaskCallback != null) {
+			mViewerServerTaskCallback.onClickImeiHelp();
+		} else {
+			mServerCallback.onClickImeiHelp();
+		}
+	}
+	
+	public void onClickImeiLogin() {
+		if(mViewerServerTaskCallback != null) {
+			mViewerServerTaskCallback.onClickImeiLogin();
+		} else {
+			mServerCallback.onClickImeiLogin();
+		}
+	}
+
+	public void setUpdateMessage(Message msg) {
+		mUpdateInfo = msg;
+	}
+
+	public Message getUpdateMessage() {
+		return mUpdateInfo;
+	}
+
+	public void finishActivity() {
+		if(mServerCallback != null)
+			((EbookLauncher)mServerCallback).finish();
+	}
+	
+	public void initGetNotPurchasedInfo() {
+		mGetNotPurchasedFlag = true;
+	}
+
+	public void clearWaitingDownloadItems() {
+		mWaitingDownloadItems = null;
+	}
+
+	public String getWaitingDownloadItems() {
+		return mWaitingDownloadItems;
+	}
+
+	private void updateCoverFlowImages(ArrayList<Long> downloadTitleIdList) {
+		if(downloadTitleIdList == null) {
+			downloadTitleIdList = new ArrayList<Long>();
+			if(mRecommendations != null) {
+				for(CoverFlowImageData item: mRecommendations) {
+					if(!item.isSample) {
+						downloadTitleIdList.add(item.titleId);
+					}
+				}
+			}
+		}
+
+		JSONArray jsroot = new JSONArray();
+		int sampleCount = (mSamples == null ? 0 : mSamples.size());
+		int addSampleCount = 0;
+		 ArrayList<CoverFlowImageData> readyTitleIdList = new ArrayList<CoverFlowImageData>();
+		for(int i = 0 ; i < sampleCount ; i++) {
+			try {
+				if(mSamples != null) {
+					SampleInfo sample = mSamples.get(i);
+					if(!Util.isExistsTitleImage(mContext, sample.titleId, sample.contentId)) {
+						JSONObject jsobj = new JSONObject();
+						jsobj.put(TitleInfo.TITLE_ID, Util.getTitleId(sample.titleId));
+						jsobj.put(ContentInfo.CONTENTS_ID, sample.contentId == null ? "" : sample.contentId);
+						jsroot.put(jsobj);
+						//send request per 10 image
+						if(jsroot.length() == 10 || i == sampleCount - 1) {
+							Map<String, String> request = new HashMap<String, String>();
+							request.put(ThumbnailDownload.BOOK_THUMBNAIL_DOWNLOADER_DATA, jsroot.toString());
+
+							ThumbnailDownload thumbnailDownload = new ThumbnailDownload(mContext);
+							thumbnailDownload.setRequest(request);
+							thumbnailDownload.setRequestType(ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_COVER_FLOW_SAMPLE);
+							thumbnailDownload.setCallback(EbookModel.this);
+							EbookModel.runOnBackgroundThread(thumbnailDownload);
+							jsroot = new JSONArray();
+						}
+					}
+
+					boolean found = false;
+					for(CoverFlowImageData data: readyTitleIdList) {
+						if(data.titleId == sample.titleId) {
+							found = true;
+							break;
+						}
+					}
+					if(!found) {
+						synchronized(mTitleListLock) {
+							if(mAllTitleList != null) {
+								for(TitleInfo title: mAllTitleList) {
+									if(title.titleId == sample.titleId) {
+										found = true;
+										break;
+									}
+								}
+							}
+						}
+					}
+
+					if(!found) {
+						readyTitleIdList.add(new CoverFlowImageData(sample.titleId, true));
+						addSampleCount++;
+					}
+
+					if(addSampleCount >= CoverflowSync.COVERFLOW_SAMPLE_ITEM_MAX)
+						break;
+				}
+			} catch (JSONException e) {
+				e.getStackTrace();
+			}
+		} // end of for
+
+		if(jsroot.length() > 0) {
+			Map<String, String> request = new HashMap<String, String>();
+			request.put(ThumbnailDownload.BOOK_THUMBNAIL_DOWNLOADER_DATA, jsroot.toString());
+
+			ThumbnailDownload thumbnailDownload = new ThumbnailDownload(mContext);
+			thumbnailDownload.setRequest(request);
+			thumbnailDownload.setRequestType(ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_COVER_FLOW_SAMPLE);
+			thumbnailDownload.setCallback(EbookModel.this);
+			EbookModel.runOnBackgroundThread(thumbnailDownload);
+		}
+
+		int count = downloadTitleIdList.size();
+		if(count > 0) {
+			for(int i = count - 1 ; i >= 0 ; i--) {
+				long currentId = downloadTitleIdList.get(i);
+				if(currentId >= 0) {
+					boolean found = false;
+					synchronized(mTitleListLock) {
+						if(mAllTitleList != null) {
+							for(TitleInfo title: mAllTitleList) {
+								List<ContentInfo> list = title.getPurchasedContents();
+								if(list != null && list.size() > 0) {
+									if(title.titleId == currentId) {
+										found = true;
+										break;
+									}
+								}
+							}
+						}
+
+						if(mSamples != null && !found) {
+							for(SampleInfo sample: mSamples) {
+								if(sample.titleId == currentId) {
+									found = true;
+									break;
+								}
+							}
+						}
+
+						if(found)
+							downloadTitleIdList.remove(i);
+					}
+				}
+			}
+		}
+
+		count = downloadTitleIdList.size();
+
+		jsroot = new JSONArray();
+		try {
+			for(int i = 0; i < count; i++) {
+				long currentItem = downloadTitleIdList.get(i);
+				if(!Util.isExistsTitleImage(mContext, currentItem, null))  {
+					JSONObject jsobj = new JSONObject();
+					jsobj.put(TitleInfo.TITLE_ID, Util.getTitleId(currentItem));
+					jsobj.put(ContentInfo.CONTENTS_ID, "");
+					jsroot.put(jsobj);
+					//send request per 10 image
+					if(jsroot.length() == 10 || i == count - 1) {
+						Map<String, String> request = new HashMap<String, String>();
+						request.put(ThumbnailDownload.BOOK_THUMBNAIL_DOWNLOADER_DATA, jsroot.toString());
+					
+						ThumbnailDownload thumbnailDownload = new ThumbnailDownload(mContext);
+						thumbnailDownload.setRequest(request);
+						thumbnailDownload.setRequestType(ThumbnailDownload.THUMBNAIL_REQUEST_TYPE_COVER_FLOW);
+						thumbnailDownload.setCallback(EbookModel.this);
+						EbookModel.runOnBackgroundThread(thumbnailDownload);
+						jsroot = new JSONArray();
+					}
+				}
+
+				boolean found = false;
+				for(CoverFlowImageData data: readyTitleIdList) {
+					if(data.titleId == currentItem) {
+						found = true;
+						break;
+					}
+				}
+				if(!found) {
+					readyTitleIdList.add(new CoverFlowImageData(currentItem, false));
+					if(readyTitleIdList.size() == Constants.COVERFLOW_ITEM_COUNT)
+						break;
+				}
+			}
+		} catch (JSONException e) {
+			e.getStackTrace();
+		}
+
+		if(mNotPurchasedInfoList != null && mNotPurchasedInfoList.size() > 0) {
+			for(TitleInfo titleInfo : mNotPurchasedInfoList) {
+				GetNotPurchasedInfo getNotPurchased = new GetNotPurchasedInfo(mContext);
+				Map<String, String> request2 = new HashMap<String, String>();
+				request2.put(TitleInfo.TITLE_ID, String.valueOf(titleInfo.titleId));
+				getNotPurchased.setRequest(request2);
+				getNotPurchased.setCallback(EbookModel.this);
+				EbookModel.runOnBackgroundThread(getNotPurchased, true);
+			}
+			mNotPurchasedInfoList.clear();
+		}
+
+		Util.getImageThumbnail(mContext, this, getTitlesList());
+
+//		if(readyTitleIdList.size() > 0) {
+			if(mRecommendations != null) {
+				StringBuilder sb = new StringBuilder();
+				for(CoverFlowImageData data: mRecommendations)
+					sb.append(data.titleId + "(" + data.isSample + "), ");
+				android.util.Log.e(TAG, "[RIG] mRecommendations : " + sb.toString());
+			} else {
+				android.util.Log.e(TAG, "[RIG] mRecommendations : NULL");
+			}
+
+			StringBuilder sb2 = new StringBuilder();
+			for(CoverFlowImageData data: readyTitleIdList)
+				sb2.append(data.titleId + "(" + data.isSample + "), ");
+			android.util.Log.e(TAG, "[RIG] readyTitleIdList : " + sb2.toString());
+
+			mRecommendations = readyTitleIdList;
+			setCoverflowMode(CoverflowMode.RECOMMENDS);
+//		}
+	}
+
+	public void setPendingBookmarkAction(int title, int content) {
+		mBookmarkPendingTitle = title;
+		mBookmarkPendingContent = content;
+	}
+
+	public int[] getPendingBookmarkAction() {
+		return new int[] { mBookmarkPendingTitle, mBookmarkPendingContent };
+	}
+
+	public void setCurrentRunnable(CancelableRunnable runnable) {
+	    mCurrentRunnable = runnable;
+	}
+    
+    public CancelableRunnable getCurrentRunnable() {
+        return mCurrentRunnable;
+    }
+
+    public void setPendingStartViewerIntent(Intent intent) {
+    	mPendingStartViewerIntent = intent;
+    }
+
+    public Intent getPendingStartViewerIntent() {
+        Log.i(TAG, "CDD getPendingStartViewerIntent() " + mPendingStartViewerIntent);
+    	Intent ret = mPendingStartViewerIntent;
+    	mPendingStartViewerIntent = null;
+    	return ret;
+    }
+}

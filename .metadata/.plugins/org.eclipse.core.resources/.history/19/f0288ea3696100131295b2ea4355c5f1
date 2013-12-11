@@ -1,0 +1,59 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:paddingBottom="@dimen/activity_vertical_margin"
+    android:paddingLeft="@dimen/activity_horizontal_margin"
+    android:paddingRight="@dimen/activity_horizontal_margin"
+    android:paddingTop="@dimen/activity_vertical_margin"
+    tools:context=".MainActivity" >
+    
+    <TextView
+        android:id="@+id/label_curr_free_space"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Curr free space : " />
+    
+    <TextView
+        android:id="@+id/value_curr_free_space"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toRightOf="@id/label_curr_free_space"
+        android:text="Curr free space : " />
+    
+    <TextView
+        android:id="@+id/label_tmp_file_size"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/label_curr_free_space"
+        android:text="Curr tmp file size : " />
+    
+    <TextView
+        android:id="@+id/value_tmp_file_size"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toRightOf="@id/label_tmp_file_size"
+        android:text="Curr free space : " />
+
+    <TextView
+        android:id="@+id/label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/label_curr_free_space"
+        android:text="Type in bytes to free : " />
+    
+    <EditText 
+        android:id="@+id/edit_value"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toRightOf="@id/label"
+        android:hint="0"/>
+    
+    <Button
+        android:id="@+id/btn_eat_up"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/label"
+        android:text="Eat up!" />
+
+</RelativeLayout>

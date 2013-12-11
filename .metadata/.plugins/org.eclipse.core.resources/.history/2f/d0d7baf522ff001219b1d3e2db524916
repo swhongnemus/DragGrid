@@ -1,0 +1,1497 @@
+package jp.co.nttdocomo.ebook;
+
+
+import android.content.ContentValues;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.database.ContentObserver;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentActivity;
+import android.support.v4.app.FragmentManager;
+import android.support.v4.app.FragmentManager.BackStackEntry;
+import android.support.v4.app.FragmentTransaction;
+import android.util.Log;
+import android.view.KeyEvent;
+import android.view.View;
+import android.webkit.CookieManager;
+import android.webkit.CookieSyncManager;
+import android.widget.BaseAdapter;
+import android.widget.Toast;
+
+import com.nemustech.widget.tf.ActionBar;
+import com.nemustech.widget.tf.ActionBar.OnActionBarClickListener;
+import com.nemustech.widget.tf.CoverFlowView;
+import com.nemustech.widget.tf.CoverFlowView.OnCoverflowItemClickListener;
+import com.nemustech.widget.tf.SoftCoverFlow;
+import com.nemustech.widget.tf.SoftCoverFlowLand;
+
+import jp.co.infocity.ebook.data.BookMark;
+import jp.co.nttdocomo.ebook.EbookModel.OnLoaderCallback;
+import jp.co.nttdocomo.ebook.EbookModel.OnServerInterfaceCallback;
+import jp.co.nttdocomo.ebook.EbookSettings.Contents;
+import jp.co.nttdocomo.ebook.EbookSettings.DownloadQueue;
+import jp.co.nttdocomo.ebook.EbookSettings.Sample;
+import jp.co.nttdocomo.ebook.EbookSettings.Title;
+import jp.co.nttdocomo.ebook.auth.UserLoginCallback;
+import jp.co.nttdocomo.ebook.fragments.AppInfoFragment;
+import jp.co.nttdocomo.ebook.fragments.BookShelfMainFragment;
+import jp.co.nttdocomo.ebook.fragments.CertificationFragment;
+import jp.co.nttdocomo.ebook.fragments.ContentsDetailFragment;
+import jp.co.nttdocomo.ebook.fragments.DeleteListFragment;
+import jp.co.nttdocomo.ebook.fragments.DownloadAllListFragment;
+import jp.co.nttdocomo.ebook.fragments.DownloadingDialog;
+import jp.co.nttdocomo.ebook.fragments.HelpFragment;
+import jp.co.nttdocomo.ebook.fragments.ImeiReplaceFragment;
+import jp.co.nttdocomo.ebook.fragments.SettingFragment;
+import jp.co.nttdocomo.ebook.fragments.SettingStorage;
+import jp.co.nttdocomo.ebook.fragments.StartFragment;
+import jp.co.nttdocomo.ebook.fragments.UpdateDialog;
+import jp.co.nttdocomo.ebook.fragments.WelcomeDialog;
+import jp.co.nttdocomo.ebook.fragments.common.ErrorDialogFragment;
+import jp.co.nttdocomo.ebook.server.GetMaintenanceBanner;
+import jp.co.nttdocomo.ebook.server.GetVersionCode;
+import jp.co.nttdocomo.ebook.server.HttpCommunicationService;
+import jp.co.nttdocomo.ebook.server.ImeiRegister;
+import jp.co.nttdocomo.ebook.server.SyncAllBooks;
+import jp.co.nttdocomo.ebook.server.UserMyId.UserMyIdCallback;
+import jp.co.nttdocomo.ebook.xmdf.old.bookmarkdb.DaoFactory;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.GregorianCalendar;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+
+public class EbookLauncher extends FragmentActivity 
+				implements UserLoginCallback,
+				OnServerInterfaceCallback, UserMyIdCallback,
+				OnLoaderCallback, OnActionBarClickListener,
+				OnCoverflowItemClickListener {
+	private static final String TAG = "EbookLauncher";	
+	private static final String KEY_STATE_EBOOK_MODE = "state_ebook_mode";
+//	private static final String KEY_STATE_EBOOK_MODE_PREV = "prev_state_ebook_mode";
+	private static final String KEY_STATE_SYNC_RUNNING = "sync_running_state";
+	private static final String KEY_STATE_IN_SETTING = "in_setting";
+	private static final String KEY_STATE_TAKE_OVER = "take_over";
+	
+	private static final String KEY_BUNDLE = "saved_bundle";
+	private static final String KEY_BUNDLE_CURRENT = "current_bundle";
+	private static final String KEY_BUNDLE_BEFORE = "before_bundle";
+	
+	private EbookModel mModel;
+	private View mBookShelfContainer;
+	private ActionBar mActionBar;
+	
+	private Handler mHandler;
+	
+	private Bundle mContentInfoBundle;
+	
+	private int mCoverflowIndex = 0;
+	
+	private boolean mIsDestroyed = false;
+	private boolean mIsSyncStarted = false;
+	private boolean mInSetting = false;
+	private boolean mTakeoverFlg;
+	
+	private boolean mIsOnSaveInstanceStateCalled = false;
+	
+	private static final int SPLASH_DISPLAY_LENGTH = 500;
+	private static final int HOLDING_PERIOD = 30;
+	
+	StartDownloadObserver mDownloadObserver;
+	
+	private boolean mIsPaused = false;
+
+    abstract class EbookStateObj {
+        abstract void enter(FragmentTransaction ft, Bundle bundle);
+    }
+	
+	public enum EbookState {
+		BOOKSHELF_MAIN {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateMain;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return true; }
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_BOOKSELF; }
+		},
+		CONTENTS_DETAIL {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateContentDetail;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return true; }
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_DETAIL; }
+		},
+		DELETE_LIST {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateDeleteList;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return true; }
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_DELETE; }
+		},
+		DOWNLOAD_ALL_LIST {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateDownloadAllList;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return true; }
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_DOWNLOAD; }
+		},
+		SPLASH {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateSplash;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return false; } // No mode for action bar
+
+			@Override
+			protected int actionBarMode() {	return -1; }
+		},
+		CERTIFICATION {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateCertification;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return false; } // No mode for action bar
+
+			@Override
+			protected int actionBarMode() {	return -1; }
+		},
+		IMEI_REPLACE {
+		    @Override
+		    protected EbookStateObj getState(EbookLauncher stateContext) {
+		        return stateContext.mStateImeiReplace;
+		    }
+			
+			@Override
+			protected boolean isActionBarVisible() { return true; } // No mode for action bar
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_IMEI_REGISTER; }
+		},
+		SETTING {
+		    @Override
+		    protected EbookStateObj getState(EbookLauncher stateContext) {
+		        return stateContext.mStateSetting;
+		    }
+
+			@Override
+			protected boolean isActionBarVisible() { return true; }
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_SETTING; }
+		},
+		HELP {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateHelp;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return false; }
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_HELP; }
+		},
+		APPINFO {
+			@Override
+			protected EbookStateObj getState(EbookLauncher stateContext) {
+				return stateContext.mStateAppInfo;
+			}
+			
+			@Override
+			protected boolean isActionBarVisible() { return true; }
+
+			@Override
+			protected int actionBarMode() {	return ActionBar.MODE_APPINFO; }
+		};
+
+		protected abstract EbookStateObj getState(EbookLauncher stateContext);
+		protected abstract boolean isActionBarVisible();
+		protected abstract int actionBarMode();
+	};
+	
+	class EbookStateMain extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+//			mActionBar.setVisibility(View.VISIBLE);
+
+			final FragmentManager fm = getSupportFragmentManager();
+			BookShelfMainFragment fragment = (BookShelfMainFragment)fm.findFragmentByTag(Constants.FRAG_TAG_MAIN);
+
+			if (fragment == null) {
+				fragment = new BookShelfMainFragment();
+			}
+			ft.replace(R.id.frag_bookshelf_main, fragment, Constants.FRAG_TAG_MAIN);
+			ft.show(fragment);
+
+			final Context context = EbookLauncher.this;
+			boolean starting_flg = EbookPreferences.getBoolean(EbookPreferences.STARTING_KEY, false);
+			int change_version = EbookPreferences.getInt(EbookPreferences.CHANGE_KEY, 0);
+			final int cur_version = Util.getVersionCode(context);
+			if (!starting_flg || change_version < cur_version) {
+				WelcomeDialog welcome = new WelcomeDialog();
+				welcome.show(fm, Constants.FRAG_TAG_CONFIRM_DIALOG);
+			}
+		}
+	}
+
+	class EbookStateContentDetail extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			mActionBar.setMode(ActionBar.MODE_DETAIL);
+			FragmentManager fm = getSupportFragmentManager();
+			
+			int targetId;
+			final boolean useMultiPanes = EbookApplication.isScreenLarge() && EbookApplication.isScreenLandscape(EbookLauncher.this);
+			
+			if(useMultiPanes) {
+				targetId = R.id.frag_bookshelf_contents;
+			} else {
+				targetId = R.id.frag_bookshelf_main;
+			}
+			
+			ContentsDetailFragment detailFragment = (ContentsDetailFragment)fm.findFragmentByTag(Constants.FRAG_TAG_DETAIL);
+			if(null == detailFragment) {
+				detailFragment = new ContentsDetailFragment();
+				ft.replace(targetId, detailFragment, Constants.FRAG_TAG_DETAIL);
+				if(bundle != null) {
+					detailFragment.setArguments(bundle);
+				}
+			} else {
+				if(!detailFragment.isAdded())
+					ft.add(detailFragment, Constants.FRAG_TAG_DETAIL);
+			}
+		}
+	}
+
+	class EbookStateDeleteList extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			FragmentManager fm = getSupportFragmentManager();
+			DeleteListFragment deleteListFragment = (DeleteListFragment)fm.findFragmentByTag(Constants.FRAG_TAG_DELETE_LIST);
+			if(null == deleteListFragment) {
+				deleteListFragment = new DeleteListFragment();
+				deleteListFragment.setArguments(bundle);
+			}
+
+			ft.replace(R.id.frag_bookshelf_main, deleteListFragment, Constants.FRAG_TAG_DELETE_LIST);
+		}
+	}
+
+	class EbookStateDownloadAllList extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			long titleId = -1L;
+			if(bundle != null) {
+				titleId = bundle.getLong(ExtraKeys.SELECTED_TITLE_ID);
+			}
+
+			FragmentManager fm = getSupportFragmentManager();
+			DownloadAllListFragment downloadListFragment = (DownloadAllListFragment)fm.findFragmentByTag(Constants.FRAG_TAG_DOWNLOAD_ALL_LIST);
+			if(downloadListFragment == null)
+				downloadListFragment = new DownloadAllListFragment();
+			downloadListFragment.setArguments(bundle);
+
+			if(mActionBar != null) {
+				mActionBar.setMode(ActionBar.MODE_DOWNLOAD);
+				mActionBar.setTitleText(getResources().getString(R.string.menu_download));
+				if(titleId < 0)
+					mActionBar.changeActionBarExpColButtonState(true);
+			}
+
+			BookshelfDownloadItemAdapter adapter = downloadListFragment.getListAdapter();
+			if(adapter == null) {
+				adapter = new BookshelfDownloadItemAdapter(EbookLauncher.this, mModel.getTitlesList());
+			}
+			downloadListFragment.setListAdapter(adapter);
+
+			ft.replace(R.id.frag_bookshelf_main, downloadListFragment, Constants.FRAG_TAG_DOWNLOAD_ALL_LIST);
+		}
+	}
+
+	class EbookStateSplash extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+//			mActionBar.setVisibility(View.INVISIBLE);
+			FragmentManager fm = getSupportFragmentManager();
+			StartFragment startFragment = (StartFragment)fm.findFragmentByTag(Constants.FRAG_TAG_START);
+			if(null == startFragment) {
+				startFragment = new StartFragment();
+			}
+			ft.replace(R.id.frag_bookshelf_overlay, startFragment, Constants.FRAG_TAG_START);
+		}
+	}
+
+	class EbookStateCertification extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+			FragmentManager fm = getSupportFragmentManager();
+			CertificationFragment certificationFragment = (CertificationFragment)fm.findFragmentByTag(Constants.FRAG_TAG_CERTIFICATION);
+			if(null == certificationFragment) {
+				certificationFragment = new CertificationFragment();
+				certificationFragment.setArguments(bundle);
+			}
+			ft.replace(R.id.frag_bookshelf_main, certificationFragment, Constants.FRAG_TAG_CERTIFICATION);
+		}
+	}
+
+	class EbookStateImeiReplace extends EbookStateObj {
+        @Override
+        void enter(FragmentTransaction ft, Bundle bundle) {
+            if(mActionBar != null) {
+                mActionBar.setMode(ActionBar.MODE_IMEI_REGISTER);
+            }
+            FragmentManager fm = getSupportFragmentManager();
+            ImeiReplaceFragment imeiRegisterFragment = (ImeiReplaceFragment)fm.findFragmentByTag(Constants.FRAG_TAG_IMEI_REGISTER);
+            if(null == imeiRegisterFragment) {
+                imeiRegisterFragment = new ImeiReplaceFragment();
+            }
+            imeiRegisterFragment.setHostTask(ImeiRegister.getInstance());
+            Bundle param = new Bundle();
+            param.putBoolean(ImeiReplaceFragment.PARAM_SHOW_TITLE, false);
+            imeiRegisterFragment.setArguments(param);
+            ft.replace(R.id.frag_bookshelf_main, imeiRegisterFragment, Constants.FRAG_TAG_IMEI_REGISTER);
+        }
+	}
+
+	class EbookStateSetting extends EbookStateObj {
+        @Override
+        void enter(FragmentTransaction ft, Bundle bundle) {
+            FragmentManager fm = getSupportFragmentManager();
+            SettingFragment settingFragment = (SettingFragment)fm.findFragmentByTag(Constants.FRAG_TAG_SETTING);
+            if (settingFragment == null) {
+                settingFragment = new SettingFragment();
+            }
+            ft.replace(R.id.frag_bookshelf_main, settingFragment, Constants.FRAG_TAG_SETTING);
+        }
+	}
+
+	class EbookStateHelp extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			FragmentManager fm = getSupportFragmentManager();
+			HelpFragment help = (HelpFragment)fm.findFragmentByTag(Constants.FRAG_TAG_HELP);
+			if(help == null) {
+				help = new HelpFragment();
+			}
+			ft.replace(R.id.frag_bookshelf_main, help, Constants.FRAG_TAG_HELP);
+		}
+	}
+
+	class EbookStateAppInfo extends EbookStateObj {
+		@Override
+		void enter(FragmentTransaction ft, Bundle bundle) {
+			FragmentManager fm = getSupportFragmentManager();
+			AppInfoFragment info = (AppInfoFragment)fm.findFragmentByTag(Constants.FRAG_TAG_APPINFO);
+			if(info == null) {
+				info = new AppInfoFragment();
+			}
+			ft.replace(R.id.frag_bookshelf_main, info, Constants.FRAG_TAG_APPINFO);
+		}
+	}
+
+	// State objects
+	private EbookStateMain mStateMain = new EbookStateMain();
+	private EbookStateContentDetail mStateContentDetail = new EbookStateContentDetail();
+	private EbookStateDeleteList mStateDeleteList = new EbookStateDeleteList();
+	private EbookStateDownloadAllList mStateDownloadAllList = new EbookStateDownloadAllList();
+	private EbookStateSplash mStateSplash = new EbookStateSplash();
+	private EbookStateCertification mStateCertification = new EbookStateCertification();
+	private EbookStateImeiReplace mStateImeiReplace = new EbookStateImeiReplace();
+	private EbookStateSetting mStateSetting = new EbookStateSetting();
+	private EbookStateHelp mStateHelp = new EbookStateHelp();
+	private EbookStateAppInfo mStateAppInfo = new EbookStateAppInfo();
+
+	public void changeState(final EbookState newState) {
+		changeState(newState, null);
+	}
+
+	public void changeState(final EbookState state, final Bundle bundle) {
+		FragmentManager fm = getSupportFragmentManager();
+		FragmentTransaction ft = fm.beginTransaction();
+		BackStackEntry entry = getBackStackEntry();
+		if(entry != null) {
+			boolean popped = fm.popBackStackImmediate(state.name(), 0);
+			if(state.toString().equals(entry.getName()) || popped) {
+				ContentsDetailFragment detailFragment = (ContentsDetailFragment)fm.findFragmentByTag(Constants.FRAG_TAG_DETAIL);
+				if(null != detailFragment && bundle != null) {
+					Bundle args = detailFragment.getArguments();
+					if(args == null) args = new Bundle();
+					args.putLong(ExtraKeys.TITLE_ID, bundle.getLong(ExtraKeys.TITLE_ID));
+					args.putString(ExtraKeys.CONTENTS_ID, bundle.getString(ExtraKeys.CONTENTS_ID));
+				}
+
+				if(mActionBar != null) {
+					mActionBar.setVisibility(state.isActionBarVisible() ? View.VISIBLE : View.GONE);
+				}
+				if(state == EbookState.CONTENTS_DETAIL) {
+					if(detailFragment != null) {
+						detailFragment.changeContent(bundle);
+					}
+				}
+				return;
+			}
+		}
+		state.getState(EbookLauncher.this).enter(ft, bundle);
+		if(state != EbookState.SPLASH) {
+			final int backStackCount = fm.getBackStackEntryCount();
+			ft.addToBackStack(state.name());
+
+			boolean isFullScreen = !state.isActionBarVisible();
+			if(mActionBar != null) {
+				mActionBar.setVisibility(isFullScreen ? View.GONE : View.VISIBLE);
+			}
+			// Because of using overlay, Splash fragment need visibility change
+			// Splash is only valid before meta data sync finish of app main screen
+			// activate. During life cycle, Splash fragment change it's visibility
+			if(backStackCount == 0 &&
+					(state == EbookState.CERTIFICATION || state == EbookState.IMEI_REPLACE))
+				findViewById(R.id.frag_bookshelf_overlay).setVisibility(View.GONE);
+		}
+		
+		if(!mIsDestroyed) {
+			if(mIsPaused)
+				ft.commitAllowingStateLoss();
+			else
+				ft.commit();
+		}
+	}
+
+	// Test code only
+	private String testDumpPopStack(FragmentManager fm) {
+		StringBuffer strBuf = new StringBuffer();
+		int count = fm.getBackStackEntryCount(); 
+		for(int i = 0; i < count; i++) {
+			for(int j = 0; j < i; j++)
+				strBuf.append(" ");
+			strBuf.append("\n  stack at(").append(i).append(") = ").append(fm.getBackStackEntryAt(i));
+		}
+		
+		return strBuf.toString();
+	}
+	
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		
+		//TODO Test only code
+		if(Debug.DEBUG)
+			EbookModel.clearAllRecords(this, DownloadQueue.CONTENT_URI);
+
+		super.onCreate(savedInstanceState);
+
+		EbookApplication app = (EbookApplication)getApplication();
+		mModel = app.getModel();
+		mModel.setOnLoaderCallBack(this);
+		mModel.setOnServerInterfaceCallback(this);
+
+		View coverflow = app.getCoverFlowViewNotRemove();
+		if(coverflow != null) {
+			if(coverflow.getClass().equals(CoverFlowView.class)) {
+				CoverFlowView cover = (CoverFlowView)coverflow;
+				cover.setOnCoverflowItemClickListener(this);
+			}
+		}
+
+		//init setting
+		
+		mDownloadObserver = new StartDownloadObserver();
+		getContentResolver().registerContentObserver(DownloadQueue.CONTENT_URI, true, mDownloadObserver);
+				
+		setContentView(R.layout.ebook_main);
+		mBookShelfContainer = findViewById(R.id.bookshelf_main_frame);
+		mActionBar = (ActionBar) mBookShelfContainer.findViewById(R.id.main_action_bar);
+		mActionBar.setOnActionBarClickListener(this);
+		mHandler = new Handler();
+
+		if(savedInstanceState == null) {
+			//init setting default
+			Util.setSortType(this, R.string.sort_date);
+			EbookPreferences.putBoolean(ExtraKeys.NEW_ITEM_ONLY, false);
+			EbookPreferences.putBoolean(ExtraKeys.RECOMMEND_HIDDEN, false);
+
+			changeState(EbookState.SPLASH);
+			start();
+		} else {
+			//init setting from saved instance
+			mTakeoverFlg = savedInstanceState.getBoolean(KEY_STATE_TAKE_OVER);
+			mInSetting = savedInstanceState.getBoolean(KEY_STATE_IN_SETTING, false);
+
+			mIsSyncStarted = savedInstanceState.getBoolean(KEY_STATE_SYNC_RUNNING);
+			
+			Util.setSortType(this, savedInstanceState.getInt(EbookPreferences.SORT_TYPE));
+			EbookPreferences.putBoolean(ExtraKeys.NEW_ITEM_ONLY, savedInstanceState.getBoolean(ExtraKeys.NEW_ITEM_ONLY));
+			EbookPreferences.putBoolean(ExtraKeys.RECOMMEND_HIDDEN, savedInstanceState.getBoolean(ExtraKeys.RECOMMEND_HIDDEN));
+
+			final String sessionID = Encrypt.decodeTripleDES(this, EbookPreferences.getString(EbookPreferences.SESSION_ID, ""));
+			final String userID = Encrypt.decodeTripleDES(this, EbookPreferences.getString(EbookPreferences.USER_ID, ""));
+			if("".equals(sessionID) || "".equals(userID)) {
+				changeState(EbookState.SPLASH);
+				start();
+				return;
+			}
+		}
+		
+		 loadOldDataAtFile();
+	}
+
+	@Override
+	protected void onNewIntent(Intent intent) {
+		setIntent(intent);
+		start();
+	}
+	
+	@Override
+	protected void onResume() {
+		Util.requestAutoRotation(this);
+		super.onResume();
+		mIsPaused = false;
+	}
+
+	@Override
+	protected void onPostResume() {
+		super.onPostResume();
+	
+		if(mModel != null) {
+			mModel.onActionStateResume();
+		}
+	}
+
+	@Override
+	protected void onPause() {
+		android.util.Log.d("hsw_dbg", " onPause");
+		super.onPause();
+		mIsPaused = true;
+		
+		if(mModel != null) {
+			android.util.Log.d("hsw_dbg", " set pending");
+			mModel.onActionStatePending();
+		}
+	}
+
+	@Override
+	protected void onDestroy() {
+		if(mModel != null && !mIsOnSaveInstanceStateCalled) {
+			mModel.onActionStateDrop();
+		} else {
+			mModel.onActionStatePending();
+		}
+		
+		mIsDestroyed = true;
+		EbookModel.stopThreads();
+		
+		getContentResolver().unregisterContentObserver(mDownloadObserver);
+		super.onDestroy();
+	}
+
+	public void start() {
+		//if(mModel.loadAllTitles()) onLoaderFinished();
+		mModel.loadAllTitles();
+	}
+
+	@Override
+	public void onLoaderStarted() {
+
+	}
+
+	@Override
+	public void onLoaderFinished() {
+		boolean starting_flg = EbookPreferences.getBoolean(EbookPreferences.STARTING_KEY, false);
+		if (!starting_flg) { // || change_flg) {
+			if (!Util.checkDataState(getApplicationContext())) {
+				//showDialog(DIALOG_COMMUNICATION_REQUIRED);
+				//TODO
+				finish();
+			}
+		}
+		final String sessionID = Encrypt.decodeTripleDES(this, EbookPreferences.getString(EbookPreferences.SESSION_ID, ""));
+		final String userID = Encrypt.decodeTripleDES(this, EbookPreferences.getString(EbookPreferences.USER_ID, ""));
+		final boolean sendFlg = EbookPreferences.getBoolean(EbookPreferences.SEND_USER_NO, false);
+
+		mTakeoverFlg = false;
+		String siteUrl = (Debug.USE_STAGING_SERVER)?getResources().getString(R.string.site_url_debug)
+				:getResources().getString(R.string.site_url);
+		Uri uri = getIntent().getData();
+		if (uri != null) {
+			if (uri.getQueryParameter("data") != null
+					&& uri.getQueryParameter("type") != null
+					&& uri.getQueryParameter("seed") != null) {
+				// データ復号
+				boolean isUseDocomoId = true;
+				Encrypt.DecryptData data = Encrypt.getDecrypt(
+						uri.getQueryParameter("data"),
+						Integer.valueOf(uri.getQueryParameter("type")),
+						Integer.valueOf(uri.getQueryParameter("seed"))
+						);
+				// 復号化できたか
+				if (data.getUserNo() == null || data.getSessionId() == null) {
+					//							showDialog(DIALOG_NETWORK_FAILED);
+					//TODO 
+					Toast.makeText(EbookLauncher.this, "get id fail", Toast.LENGTH_SHORT).show();
+					finish();
+					return;
+				}
+
+				if (!userID.equals("") && !(data.getUserNo().equals(userID))) {
+					// Stop prev download
+					// TODO
+					mTakeoverFlg = true;
+					CookieManager.getInstance().setCookie(siteUrl, HttpCommunicationService.SESSION_ID_KEY+"=" + data.getSessionId());
+					CookieSyncManager.getInstance().sync();
+
+					EbookPreferences.putString(EbookPreferences.SESSION_ID, Encrypt.encodeTripleDES(EbookLauncher.this, CookieManager.getInstance().getCookie(siteUrl)));
+					EbookPreferences.putString(EbookPreferences.USER_ID, Encrypt.encodeTripleDES(EbookLauncher.this, data.getUserNo()));
+					Date currentDate = new Date();
+					SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmmss");
+					EbookPreferences.putString(EbookPreferences.SYNC_TIME, formatter.format(currentDate));
+					EbookPreferences.putString(EbookPreferences.MSN_NO, EbookPreferences.getString(EbookPreferences.MSN_NO, ""));
+					EbookPreferences.putBoolean(EbookPreferences.SEND_USER_NO, false);
+					//							Application ap = (Application) getApplication();
+					if (uri.getQueryParameter("docomoIdFlg") == null
+							|| uri.toString().indexOf("docomoIdFlg") < 0) {
+						isUseDocomoId = true;
+					} else if (uri.getQueryParameter("docomoIdFlg").equals("0")) {
+						isUseDocomoId = true;
+					} else if (uri.getQueryParameter("docomoIdFlg").equals("1")) {
+						isUseDocomoId = false;
+					}
+					EbookPreferences.remove(EbookPreferences.LAST_SYNC_DATE);
+
+					//TODO
+					//NotificationUtil.cancelAllNotification(getApplicationContext());
+				} else if(uri.getQueryParameter("docomoIdFlg") != null) {
+					if(uri.getQueryParameter("docomoIdFlg").equals("0")) {
+						isUseDocomoId = true;
+					} else if(uri.getQueryParameter("docomoIdFlg").equals("1")) {
+						isUseDocomoId = false;
+					}
+				} else {
+					isUseDocomoId = true;
+				}
+				EbookPreferences.putString(EbookPreferences.DOCOMO_ID_FLAG, isUseDocomoId ? "0" : "1");
+			}
+		}
+
+		if (!Util.isAirPlaneMode(getApplicationContext())) {
+			if (Util.checkSimState(getApplicationContext())) {
+				if (!EbookPreferences.getString(EbookPreferences.MSN_NO, "").equals("")
+						&& !(EbookPreferences.getString(EbookPreferences.MSN_NO, "").equals(UserInfo.getMsnNo(EbookLauncher.this)))) {//telManager.getSimSerialNumber()))) { // || !sendFlg) {
+					clearAuthentication();
+					EbookPreferences.remove(EbookPreferences.MSN_NO);
+					EbookPreferences.remove(EbookPreferences.STARTING_KEY);
+					EbookPreferences.remove(EbookPreferences.LAST_SYNC_DATE);
+					EbookPreferences.putBoolean(EbookPreferences.SEND_USER_NO, false);
+					mTakeoverFlg = true;
+					//							Log.d(getClass().getSimpleName(), "userdata cleanup");
+				}
+				EbookPreferences.putString(EbookPreferences.MSN_NO, UserInfo.getMsnNo(EbookLauncher.this)); //telManager.getSimSerialNumber());
+			}
+		}
+		if(!mTakeoverFlg && (!sendFlg || ("").equals(userID) || ("null").equals(userID)
+				|| ("").equals(sessionID) || ("null").equals(sessionID))) {
+			clearAuthentication();
+			EbookPreferences.remove(EbookPreferences.LAST_SYNC_DATE);
+			EbookPreferences.putBoolean(EbookPreferences.SEND_USER_NO, false);
+			mTakeoverFlg = true;
+		}
+		if (EbookPreferences.contains(EbookPreferences.SYNC_TIME)) {
+			Date now_date = new Date();
+			SimpleDateFormat format = new SimpleDateFormat("yyyyMMddHHmmss");
+			Calendar cal = new GregorianCalendar();
+			Date period_date = new Date();
+			try {
+				cal.setTime(format.parse(EbookPreferences.getString(EbookPreferences.SYNC_TIME, "")));
+				cal.add(Calendar.DATE, HOLDING_PERIOD);
+				period_date = cal.getTime();
+			} catch (ParseException e) {
+				e.printStackTrace();
+			}
+			if (now_date.compareTo(period_date) >= 0) {
+				clearAuthentication();
+				if (!Util.checkDataState(getApplicationContext())) {
+					if (isFinishing()) {
+						return;
+					}
+					//TODO
+					//showDialog(DIALOG_COMMUNICATION_REQUIRED);
+					finish();
+				}
+			}
+		}
+
+		String newSessionID = Encrypt.decodeTripleDES(EbookLauncher.this, EbookPreferences.getString(EbookPreferences.SESSION_ID, ""));
+		CookieManager.getInstance().setCookie(siteUrl, newSessionID);
+		startVersionCheck();
+	}
+	
+	private void moveToNextState() {
+		Intent mainIntent = getIntent();
+		// IMEIエラーかつ無料立ち読みから来た場合はアプリを終了させる
+		//		boolean imeiLimit = pref.getBoolean("imei_limit_over", false);
+		String titleId;
+		String contentId;
+		String isSample = null;
+		
+		if(mainIntent.getData() != null) {
+			titleId = mainIntent.getData().getQueryParameter(ExtraKeys.TITLE_ID);
+			contentId = mainIntent.getData().getQueryParameter(ExtraKeys.ITEM_ID);
+			isSample = mainIntent.getData().getQueryParameter(ExtraKeys.SAMPLE_FLG);
+		}
+		else if(mainIntent.getExtras() != null) {
+			Bundle bundle = mainIntent.getExtras();
+			titleId = String.valueOf(bundle.getLong(ExtraKeys.TITLE_ID));
+			contentId = bundle.getString(ExtraKeys.ITEM_ID);
+		}
+		else {
+			FragmentManager fm = getSupportFragmentManager();
+			if(fm.getBackStackEntryCount() <= 0) changeState(EbookState.BOOKSHELF_MAIN);
+			return;
+		}
+
+		if (isSample != null && isSample.equals("1")) {
+			SampleInfo sampleInfo = mModel.findSampleInfo(Long.valueOf(titleId), contentId);
+			if(sampleInfo == null) {
+				sampleInfo = new SampleInfo();
+				sampleInfo.titleId = Long.valueOf(titleId);
+				sampleInfo.contentId = contentId;
+				sampleInfo.downloadDate = System.currentTimeMillis();
+				
+				mModel.addSampleInfo(this, sampleInfo);
+
+				ContentValues values = new ContentValues();
+				values.put(Sample.TITLE_ID, sampleInfo.titleId);
+				values.put(Sample.CONTENTS_ID, sampleInfo.contentId);
+				EbookModel.addToDatabase(this, Sample.CONTENT_URI, sampleInfo);
+			}
+
+			// start download and start viewer
+			FragmentManager fm = getSupportFragmentManager();
+			DownloadingDialog downloadingFragment = 
+					(DownloadingDialog) fm.findFragmentByTag(Constants.FRAG_TAG_DOWNLOADING);
+			if(downloadingFragment == null) {
+				downloadingFragment = new DownloadingDialog();
+			}
+			mModel.setTemporarySampleInfoForDownloads(sampleInfo);
+			downloadingFragment.setContentInfo(
+					mModel.getTemporarySamplInfoForDownloads());
+
+			Bundle bundle = new Bundle();
+			bundle.putInt(ExtraKeys.CONTENTS_DOWNLOAD_POSITION, SettingStorage.STORAGE_NOT_SAVE);
+			downloadingFragment.setArguments(bundle);
+			downloadingFragment.show(fm, Constants.FRAG_TAG_DOWNLOADING);
+		}
+		else if(titleId == null) {
+			changeState(EbookState.BOOKSHELF_MAIN);
+		}
+		else {
+			Bundle bundle = new Bundle();
+			bundle.putLong(ExtraKeys.TITLE_ID, Long.valueOf(titleId));
+			bundle.putString(ExtraKeys.CONTENTS_ID, contentId);
+			changeState(EbookState.CONTENTS_DETAIL, bundle);
+		}
+	}
+	
+	private void clearAuthentication() {
+		EbookPreferences.remove(EbookPreferences.SESSION_ID);
+		EbookPreferences.remove(EbookPreferences.DOCOMO_ID_FLAG);
+		CookieManager cookieManager = CookieManager.getInstance();
+		if (cookieManager.hasCookies() || cookieManager.getCookie(Util.getStoreTopUrl(getApplicationContext()).toString()) != null) {
+			cookieManager.removeAllCookie();
+		}
+	}
+
+	private void startVersionCheck() {
+		GetVersionCode gvc = new GetVersionCode(this, false);
+		Map<String, String> params = new HashMap<String, String>();
+		gvc.setRequest(params);
+		gvc.setCallback(mModel);
+		EbookModel.runOnWorkerThread(gvc);
+	}
+	
+	@Override
+	public void onBackPressed() {
+		final FragmentManager fm = getSupportFragmentManager();
+		final int stackEntryCount = fm.getBackStackEntryCount();
+		if(stackEntryCount <= 0) { 
+			super.onBackPressed();
+			return;
+		}
+
+		final String entryName = getBackStackEntry().getName();
+		if(EbookState.BOOKSHELF_MAIN.name().equals(entryName)
+				|| stackEntryCount == 1 && EbookState.CERTIFICATION.name().equals(entryName)) {
+			finish();
+			return;
+		} else if(EbookState.CONTENTS_DETAIL.name().equals(entryName)) {
+			changeState(EbookState.BOOKSHELF_MAIN);
+			if(mActionBar != null) {
+				mActionBar.setMode(EbookState.BOOKSHELF_MAIN.actionBarMode());
+			}
+		} else {
+			if(fm.popBackStackImmediate()) {
+				final int backStackCount = fm.getBackStackEntryCount();
+				if(backStackCount > 0) {
+					final String name = fm.getBackStackEntryAt(backStackCount - 1).getName();
+					if(name != null) {
+						EbookState newState = EbookState.valueOf(name);
+						boolean isFullScreen = !newState.isActionBarVisible();
+						if(mActionBar != null) {
+							mActionBar.setVisibility(isFullScreen ? View.GONE : View.VISIBLE);
+							mActionBar.setMode(newState.actionBarMode());
+						}
+						if(newState.equals(EbookState.CONTENTS_DETAIL)) {
+							ContentsDetailFragment detailFragment = (ContentsDetailFragment)fm.findFragmentByTag(Constants.FRAG_TAG_DETAIL);
+							if(null != detailFragment && detailFragment.getItemCount() >= 0) {
+								fm.popBackStackImmediate();
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	public ActionBar getTfActionBar() {
+		return mActionBar;
+	}
+	
+	private void startCertification() {
+		changeState(EbookState.CERTIFICATION);
+	}
+
+	@Override
+	public void onSuccessUserMyId(String response) {
+		findViewById(R.id.frag_bookshelf_overlay).setVisibility(View.VISIBLE);
+
+		FragmentManager fm = getSupportFragmentManager();
+		final int backStackCount = fm.getBackStackEntryCount();
+		if(backStackCount > 0) {
+			//to remove old intent
+			setIntent(new Intent());
+			super.onBackPressed();
+		}
+
+		Map<String, String> responseMap = Util.responseSplit(response);
+		
+		String siteUrl = (Debug.USE_STAGING_SERVER)?getResources().getString(R.string.site_url_debug):getResources().getString(R.string.site_url);
+		
+		String userId = responseMap.get("UserNo");
+		String sessionId = responseMap.get("SessionID");
+
+		CookieManager cookieManager = CookieManager.getInstance();
+		cookieManager.setCookie(siteUrl, sessionId);
+		
+		final String cookieString = cookieManager.getCookie(siteUrl);
+		String phpSessionId = cookieString.substring(
+				HttpCommunicationService.SESSION_ID_KEY.length(), cookieString.indexOf(";"));
+
+		// TODO: Do nothing if user id and session id is same
+		String oldUserId = Encrypt.decodeTripleDES(this, EbookPreferences.getString(EbookPreferences.USER_ID, ""));
+		if(!userId.equals(oldUserId)) {
+			mTakeoverFlg = true;
+		}
+		else {
+			mTakeoverFlg = false;
+		}
+
+		SimpleDateFormat simpleDate = new SimpleDateFormat("yyyyMMddHHmmss");
+		EbookPreferences.putString(EbookPreferences.SYNC_TIME, simpleDate.format(new Date()));
+		EbookPreferences.putString(EbookPreferences.USER_ID, Encrypt.encodeTripleDES(this, userId));
+		EbookPreferences.putString(EbookPreferences.SESSION_ID, Encrypt.encodeTripleDES(this, phpSessionId));
+		EbookPreferences.putString(EbookPreferences.MSN_NO, UserInfo.getMsnNo(EbookLauncher.this));
+		
+		if(Debug.FAKE_USER_INFO)
+			EbookPreferences.putString(UserInfo.USER_ID_DEBUG, userId);
+
+		if(mTakeoverFlg) {
+			EbookPreferences.putBoolean(EbookPreferences.SEND_USER_NO, false);
+			startBookShelfDelete();
+		}
+		else
+			sendUserIdentification();
+	}
+	
+	private void startBookShelfSync() {
+		mIsSyncStarted = true;
+
+		GetMaintenanceBanner banner = new GetMaintenanceBanner(this);
+		banner.setRequest(new HashMap<String, String>());
+		banner.setCallback(mModel);
+
+		EbookModel.runOnWorkerThread(banner);
+
+		SyncAllBooks syncAllBooks = new SyncAllBooks(this);
+		syncAllBooks.setRequest(new HashMap<String, String>());
+		syncAllBooks.setCallback(mModel);
+
+		EbookModel.runOnWorkerThread(syncAllBooks);
+	}
+	
+	public void sendUserIdentification() {
+		boolean send_user_no = EbookPreferences.getBoolean(EbookPreferences.SEND_USER_NO, false);
+
+		if (!send_user_no) {
+			startSendUserIdentificationNumber();
+		} else {
+			startBookShelfSync();
+		}
+	}
+
+	private ImeiRegister.ImeiRegisterCallback mImeiRegisterCallback = new ImeiRegister.ImeiRegisterCallback() {
+	    private void goOn(EbookState nextState) {
+            if (null != nextState) {
+                changeState(nextState);
+            } else {
+                startBookShelfSync();
+            }
+	    }
+        @Override
+        public void onImeiRegisterSuccess(EbookState nextState) {
+            EbookPreferences.putBoolean(EbookPreferences.SEND_USER_NO, true);
+            goOn(nextState);
+        }
+        @Override
+        public void onImeiRegisterFail(EbookState nextState) {
+            goOn(nextState);
+        }
+        @Override
+        public void onImeiRegisterCancel(EbookState nextState) {
+            goOn(nextState);
+        }
+	};
+
+    private void procImeiRegister(EbookState nextState) {
+        ImeiRegister irTask = ImeiRegister.getInstance(this);  // new ImeiRegister(this, mImeiRegisterCallback, nextState);
+        irTask.setCallback(mImeiRegisterCallback);
+        irTask.setNextState(null);
+        irTask.setHostLauncher(this);
+        irTask.execute();
+    }
+
+    private void startSendUserIdentificationNumber() {
+        procImeiRegister(null);
+
+//		SendUserIdentificationNumber suin = new SendUserIdentificationNumber(this, this);
+//		Map<String, String> params = new HashMap<String, String>();
+//		params.put(SendUserIdentificationNumber.PARAMS_DOCOMO_ID, EbookPreferences.getString(EbookPreferences.DOCOMO_ID_FLAG, "0"));
+//		suin.execute(params);
+	}
+
+	@Override
+	public void onFailedUserMyId(int resId) {
+		Log.d(TAG, " onFailedUserMyId");
+	}
+
+	@Override
+	protected void onSaveInstanceState(Bundle outState) {
+		super.onSaveInstanceState(outState);
+		outState.putBoolean(KEY_STATE_SYNC_RUNNING, mIsSyncStarted);
+		outState.putBoolean(KEY_STATE_IN_SETTING, mInSetting);
+		
+		//save setting
+		outState.putInt(EbookPreferences.SORT_TYPE, Util.getSortType(this));
+		outState.putBoolean(ExtraKeys.NEW_ITEM_ONLY, EbookPreferences.getBoolean(ExtraKeys.NEW_ITEM_ONLY, false));
+		outState.putBoolean(ExtraKeys.RECOMMEND_HIDDEN, EbookPreferences.getBoolean(ExtraKeys.RECOMMEND_HIDDEN, false));
+
+		mIsOnSaveInstanceStateCalled = true;
+	}
+
+	@Override
+	protected void onRestoreInstanceState(Bundle savedInstanceState) {
+		super.onRestoreInstanceState(savedInstanceState);
+		mIsSyncStarted = savedInstanceState.getBoolean(KEY_STATE_SYNC_RUNNING);
+		mInSetting = savedInstanceState.getBoolean(KEY_STATE_IN_SETTING);
+		mTakeoverFlg = savedInstanceState.getBoolean(KEY_STATE_TAKE_OVER);
+	}
+
+	@Override
+	public void onGetVersionSuccess(Map<String, String> response) {
+		if (response != null) {
+			if (response.containsKey(HttpCommunicationService.RESPONSE_KEY_BODY)) {
+				int versionCode = 0;
+				try {
+					versionCode = Integer.valueOf(
+							(String)response.get(HttpCommunicationService.RESPONSE_KEY_BODY));
+				} catch(NumberFormatException ex) {
+					if (response.containsKey(HttpCommunicationService.RESPONSE_KEY_ERROR_CODE)) {
+						String errorCode = (String)response.get(HttpCommunicationService.RESPONSE_KEY_ERROR_CODE);
+						if(HttpCommunicationService.ERROR_CODE_AUTH_ERROR.equals(errorCode)) {
+							startCertification();
+							return;
+						} else {
+							Toast.makeText(this, "version check error", Toast.LENGTH_SHORT).show();
+							//showDialog(Integer.valueOf(errorCode));
+							//TODO
+							finish();
+							return;
+						}
+					}
+				}
+				if (versionCode > Util.getVersionCode(getApplicationContext())) {
+					Toast.makeText(this, "version check error", Toast.LENGTH_SHORT).show();
+					finish();
+					//showDialog(DIALOG_UPDATE_HAVE);
+					//TODO
+					//finish();
+				} else {
+					if (response.containsKey(HttpCommunicationService.RESPONSE_KEY_ERROR_CODE)) {
+						String errorCode = (String) response.get(HttpCommunicationService.RESPONSE_KEY_ERROR_CODE);
+						if (HttpCommunicationService.ERROR_CODE_AUTH_ERROR.equals(errorCode)) {
+							//TODO
+							startCertification();
+							return;
+						}
+					}
+					if (mTakeoverFlg) {
+						//TODO delete Hondana db
+						startBookShelfDelete();
+						return;
+					} else {
+						if(mContentInfoBundle != null) {
+							long titleId = mContentInfoBundle.getLong(ExtraKeys.TITLE_ID);
+							String contentId = mContentInfoBundle.getString(ExtraKeys.CONTENTS_ID);
+							if(titleId != 0 && contentId == null) 
+								changeState(EbookState.BOOKSHELF_MAIN);
+							else {
+								changeState(EbookState.CONTENTS_DETAIL, mContentInfoBundle);
+							}
+//						} else if (getIntent().getData() != null || getIntent().getExtras() != null) {
+//					    	startNextActivity();
+					    } else {
+					    	//TODO
+//					        startBookShelfDeleteSync();
+					    	sendUserIdentification();
+					    }
+						return;
+					}
+				}
+			}
+		}
+	}
+
+	@Override
+	public void onGetVersionFail() {
+		//TODO check fail reason whether  
+		String sessionID = Encrypt.encodeTripleDES(this, EbookPreferences.getString(EbookPreferences.SESSION_ID, ""));
+		String userID = Encrypt.encodeTripleDES(this, EbookPreferences.getString(EbookPreferences.USER_ID, ""));
+		if(!sessionID.equals("") && !userID.equals("")) {
+			moveToNextState();
+			removeSplashScreen();
+		}
+		else {
+			//TODO error dialog
+			finish();
+		}
+	}
+	
+	private void startBookShelfDelete() {
+		//TODO delete DB
+		EbookModel.deleteFromDatabase(this, Title.CONTENT_URI, null);
+		EbookModel.deleteFromDatabase(this, Contents.CONTENT_URI, null);
+		mModel.setAllTitlesList(null);
+		EbookPreferences.remove(EbookPreferences.LAST_SYNC_DATE);
+		sendUserIdentification();
+	}
+
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+	    super.onActivityResult(requestCode, resultCode, data);
+
+		if (requestCode == Constants.REQUEST_START_VIEWER) {
+			
+			if(resultCode == RESULT_OK) {
+				final Bundle bundle = data.getExtras();
+				final long titleId = bundle.getLong(ExtraKeys.TITLE_ID);
+				final String contentId = bundle.getString(ExtraKeys.ITEM_ID);
+				final String fileName = bundle.getString(ExtraKeys.CONTENTS_FILE_NAME);
+				
+				EbookApplication app = (EbookApplication)getApplication();
+				ContentInfo contentInfo = app.getModel().findContentInfoById(titleId, contentId);
+				contentInfo.isDownloaded = false;
+				final FragmentManager fm = getSupportFragmentManager();
+				final ContentsDetailFragment detailFragment = (ContentsDetailFragment) fm.findFragmentByTag(Constants.FRAG_TAG_DETAIL);
+				if(detailFragment != null) {
+					final BaseAdapter adapter = (BaseAdapter) detailFragment.getListAdapter();
+					if(adapter != null)
+						adapter.notifyDataSetChanged();
+				}
+
+				if(fileName != null) {
+					File[] cacheFiles = Util.getCacheFiles(EbookLauncher.this, fileName);
+					for(File file : cacheFiles) {
+						if(file.exists())
+							file.delete();
+					}
+				}
+			}
+		}
+	}
+
+	@Override
+	public void onSyncAllBooksFinished() {
+		if(mIsDestroyed)
+			return;
+
+		mIsSyncStarted = false;
+
+		Util.updateBookDownloadState(this, mModel, mTakeoverFlg);
+	}
+
+	@Override
+	public void onSyncDownloadStatusFinished() {
+		if(mIsDestroyed)
+			return;
+
+		mModel.notifyDatasetChange();
+		Util.getImageThumbnail(EbookLauncher.this, mModel, mModel.getTitlesList());
+		
+		final FragmentManager fm = getSupportFragmentManager();
+		final UpdateDialog updateFragment = (UpdateDialog)fm.findFragmentByTag(Constants.TAG_FRAG_UPDATE_BOOKSHELF);
+		if(updateFragment != null) 
+			updateFragment.dismiss();
+
+		moveToNextState();
+		removeSplashScreen();
+	}
+
+	@Override
+	public void onUpdatedNewOrNextItems(boolean isChanged) {
+		if(mIsDestroyed || !isChanged)
+			return;
+		
+		final FragmentManager fm = getSupportFragmentManager();
+		final ContentsDetailFragment detailFragment = (ContentsDetailFragment) fm.findFragmentByTag(Constants.FRAG_TAG_DETAIL);
+		final BookShelfMainFragment mainFragment = (BookShelfMainFragment) fm.findFragmentByTag(Constants.FRAG_TAG_MAIN);
+		if(detailFragment != null && detailFragment.isVisible()) {
+			BaseAdapter adapter = (BaseAdapter) detailFragment.getListAdapter();
+			if(adapter != null) {
+				adapter.notifyDataSetChanged();
+			}
+		} else if(mainFragment != null && mainFragment.isVisible()) {
+			BaseAdapter adapter = mainFragment.getBookshelfTitleAdapter();
+			if(mainFragment.isVisible())
+				mainFragment.blinkNewItem();
+			if(adapter != null) {
+				adapter.notifyDataSetChanged();
+			}
+		}
+	}
+	
+	@Override
+	public void onIndividualCoverImageDownloadFinished() {
+		final FragmentManager fm = getSupportFragmentManager();
+		BaseAdapter adapter = null;
+		//TODO 
+		int backStackCnt = fm.getBackStackEntryCount();
+		if(backStackCnt <= 0) {
+			return;
+		}
+		
+		final BackStackEntry entry = fm.getBackStackEntryAt(backStackCnt - 1);
+		if(entry != null) {
+			if(EbookState.BOOKSHELF_MAIN.toString().equals(entry.getName())) {
+				Fragment mainFragment =  fm.findFragmentByTag(Constants.FRAG_TAG_MAIN);
+				if(mainFragment != null && mainFragment instanceof BookShelfMainFragment)
+					adapter = ((BookShelfMainFragment)mainFragment).getBookshelfTitleAdapter();
+			} else if(EbookState.BOOKSHELF_MAIN.toString().equals(entry.getName())) {
+				ContentsDetailFragment fragment = 
+						(ContentsDetailFragment) fm.findFragmentByTag(Constants.FRAG_TAG_DETAIL);
+				if(fragment != null)
+					adapter = (BaseAdapter) fragment.getListAdapter(); 
+			}	
+		}
+		
+		if(adapter != null) {
+			adapter.notifyDataSetChanged();
+		}
+	}
+	
+	public boolean isReadyCoverflow() {
+		return ((EbookApplication)getApplication()).isCoverflowReady();
+	}
+	
+	@Override
+	public void onIndividualCoverflowImageDownloadFinished(long titleId, String contentId, boolean isSample) {
+		Log.d("DW", "[EbookLauncher#onIndividualCoverflowImageDownloadFinished]" + titleId + ", " + contentId + ", " + isSample);
+		setCoverflowImage(titleId, contentId, isSample);
+	}
+	
+	public int getCoverflowIndex() {
+		return mCoverflowIndex;
+	}
+	
+	public void setCoverflowImage(final long titleId, final String contentId, final boolean isSample) {
+		Log.d("DW", "[EbookLauncher#setCoverflowImage]" + titleId + ", " + contentId);
+
+		EbookModel.runOnWorkerThread(new Runnable() {
+			@Override
+			public void run() {
+				if(EbookApplication.isUseTextureView()) {
+					CoverFlowView cv = (CoverFlowView)((EbookApplication)getApplication()).getCoverFlowViewNotRemove();
+					if( titleId != -1) {
+						cv.setBookCover(mCoverflowIndex, titleId, contentId, isSample);
+					}
+					int id = R.drawable.text_recommendation_bg_sp;
+					if(EbookApplication.isScreenLarge())
+						id = R.drawable.text_recommendation_bg_tab;
+					Bitmap b = BitmapFactory.decodeResource(getResources(), id);
+					cv.setBookTitleBitmap(mCoverflowIndex, b);
+					mCoverflowIndex++;
+					if(mCoverflowIndex > 20) {
+						mCoverflowIndex = 0;
+					}
+				}
+				else {
+					if(EbookApplication.isScreenLandscape(EbookLauncher.this)) {
+						SoftCoverFlowLand cv = (SoftCoverFlowLand)((EbookApplication)getApplication()).getCoverFlowViewNotRemove();
+						cv.setBookCover(titleId, contentId, isSample);
+					}
+					else {
+						SoftCoverFlow cv = (SoftCoverFlow)((EbookApplication)getApplication()).getCoverFlowViewNotRemove();
+						cv.setBookCover(titleId, contentId, isSample);
+					}
+				}
+			}
+		});
+	}
+
+	private void loadOldDataAtDB() {
+		DaoFactory daoFactory = DaoFactory.getInstance(EbookLauncher.this);
+		String userId = Encrypt.decodeTripleDES(this, EbookPreferences.getString(EbookPreferences.USER_ID, ""));
+		ArrayList<jp.co.nttdocomo.ebook.xmdf.old.bookmarkdb.BookMark> bList = daoFactory.getBookMarkForViewer().readAll(userId);
+		for(jp.co.nttdocomo.ebook.xmdf.old.bookmarkdb.BookMark bm:bList) {
+			Log.d("DW", bm.getContentsName());
+		}		
+	}
+
+	private void loadOldDataAtFile() {
+		Log.d("lilililllll", "load old data at file : " );
+		mHandler.post(new Runnable() {
+			
+			@Override
+			public void run() {
+				List<File> fileBookmarkList = Util.getBookMarkFile(EbookLauncher.this);
+		        if (fileBookmarkList != null && fileBookmarkList.size() > 0) {
+		            for (int i = 0; i < fileBookmarkList.size(); i++) {
+		                File file = fileBookmarkList.get(i);
+
+		                String exts = file.getName().substring(file.getName().lastIndexOf("."), file.getName().length());
+		                if (".bkm".equals(exts)) {
+		                    FileInputStream fis = null;
+		                    ObjectInputStream ois = null;
+		                    
+		                    Object obj = null;
+
+		                    try {
+		                        fis = new FileInputStream(file);
+		                        ois = new ObjectInputStream(fis);
+		                        obj = ois.readObject();
+//		                        return obj;
+		                    } catch (IOException e) {
+		                        e.printStackTrace();
+		                        obj = null;
+		                    } catch (ClassNotFoundException e) {
+		                        e.printStackTrace();
+		                        obj = null;
+		                    } finally {
+		                        if (ois != null) {
+		                            try {
+		                                ois.close();
+		                            } catch (IOException e) {
+		                                obj = null;
+		                            }
+		                        }
+
+		                        if (fis != null) {
+		                            try {
+		                                fis.close();
+		                            } catch (IOException e) {
+		                                obj = null;
+		                            }
+		                        }
+		                    }
+		                    List<BookMark> list = (List<BookMark>)obj;
+		                    if (list == null || list.isEmpty()) {
+		                        continue;
+		                    }
+		                    
+		                    for(BookMark bookmark : list) {
+		                    	EbookModel.addToDatabase(EbookLauncher.this,
+										EbookSettings.Bookmark.CONTENT_URI,
+										BookmarkInfo.createBookmarkInfo(
+												Encrypt.decodeTripleDES(EbookLauncher.this, EbookPreferences.getString(EbookPreferences.USER_ID, "")),
+												file.getName().substring(0, 16),
+												file.getName().substring(
+														file.getName().indexOf("."), file.getName().lastIndexOf(".")) == ".book" 
+														? Constants.CONTENTS_BOOK_FORMAT_DOTBOOK : Constants.CONTENTS_BOOK_FORMAT_HBC,
+												0,
+												0,
+												0,
+												bookmark.getDate(),
+												bookmark.getCharacterIndex(),
+												0,
+												0,
+												0,
+												0));
+		                    }
+		                }
+		            }
+		        }
+			}
+		});
+		
+	}
+
+	@Override
+	public void onActionBarClick(int id) {
+		switch(id) {
+			case ActionBar.ID_SETTING:
+				changeState(EbookState.SETTING);
+				break;
+
+			case ActionBar.ID_HELP:
+				changeState(EbookState.HELP);
+				break;
+		}
+	}
+
+	@Override
+	public void onTitleClick() {
+		BackStackEntry enty = getBackStackEntry();
+		if(enty != null) {
+			if(!EbookState.BOOKSHELF_MAIN.toString().equals(enty.getName()) &&
+					!EbookState.SETTING.toString().equals(enty.getName())) {
+				onBackPressed();
+			}
+		}
+	}
+	
+	private class StartDownloadObserver extends ContentObserver {
+
+		public StartDownloadObserver() {
+			super(new Handler());
+		}
+
+		@Override
+		public void onChange(boolean selfChange) {
+			super.onChange(selfChange);
+			
+			startService(new Intent(EbookLauncher.this, DownloadService.class));
+		}
+	}
+	
+	public BackStackEntry getBackStackEntry() {
+		FragmentManager fm = getSupportFragmentManager();
+		int backStackCnt = fm.getBackStackEntryCount();
+		if(backStackCnt > 0) {
+			return fm.getBackStackEntryAt(backStackCnt - 1);
+		} else {
+			return null;
+		}
+	}
+	
+	@Override
+	public boolean onKeyDown(int keyCode, KeyEvent event) {
+	    if (keyCode == KeyEvent.KEYCODE_MENU && !mInSetting) {
+	        mActionBar.showPopupMenuForState();
+	        return true;
+	    }
+	    return super.onKeyDown(keyCode, event);
+	}
+
+	@Override
+	public void onServerTaskFailed(final int errorCode) {
+		FragmentManager fm = getSupportFragmentManager();
+		UpdateDialog updateFragment = (UpdateDialog)fm.findFragmentByTag(Constants.TAG_FRAG_UPDATE_BOOKSHELF);
+		if(updateFragment != null) updateFragment.dismiss();
+
+		final ErrorDialogFragment errorDialog = new ErrorDialogFragment();
+		Bundle bundle = new Bundle();
+		bundle.putInt(ExtraKeys.ERROR_CODE, errorCode);
+
+		switch(errorCode) {
+		case 100: // RESPONSE_CODE_COOKIE_EXPIRED = "100"
+			// TODO: need auth and try again what was going on
+			break;
+
+		case 401: // RESPONSE_CODE_SERVER_MAINTENANCE = "401"
+			bundle.putInt(ExtraKeys.CUSTOM_DIALOG_TITLE, R.string.warning);
+			bundle.putInt(ExtraKeys.CUSTOM_DIALOG_MESSAGE, R.string.error_maintenance);
+			bundle.putInt(ExtraKeys.CUSTOM_DIALOG_RIGHT_BUTTON, R.string.back);
+			bundle.putInt(ExtraKeys.CUSTOM_DIALOG_LINK_TAG, R.string.detail_info);
+			// TODO: link to where?
+			//						bundle.putString(ExtraKeys.CUSTOM_DIALOG_LINK_URI, Util.getSupportedDeviceUrl(getActivity()).toString());
+			break;
+
+		default:
+			bundle.putInt(ExtraKeys.CUSTOM_DIALOG_TITLE, R.string.error);
+			bundle.putInt(ExtraKeys.CUSTOM_DIALOG_MESSAGE, R.string.dialog_download_fail_content);
+			bundle.putInt(ExtraKeys.CUSTOM_DIALOG_RIGHT_BUTTON, R.string.ok);
+			break;
+		}
+
+		errorDialog.setArguments(bundle);
+		errorDialog.show(fm, Constants.FRAG_TAG_ERROR);
+	}
+	
+	private void removeSplashScreen() {
+		// Because of using overlay, Splash fragment need visibility change
+		// Splash is only valid before meta data sync finish of app main screen
+		// activate. During life cycle, Splash fragment change it's visibility
+		FragmentManager fm = getSupportFragmentManager();
+		Fragment splash = fm.findFragmentByTag(Constants.FRAG_TAG_START);
+		if(splash != null) {
+			FragmentTransaction ft = fm.beginTransaction();
+			ft.remove(splash);
+			ft.commit();
+		}
+	}
+
+	@Override
+	public void onCoverflowItemClick(Long titleId, String contentsId) {
+		final Uri uri = Util.getBookDetailUrl(this, titleId, contentsId);
+		if(uri != null)
+			Util.startWebActivity(this, uri);
+	}
+}
